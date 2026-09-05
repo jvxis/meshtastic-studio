@@ -60,7 +60,7 @@ Clique em **Explorar demonstração** para testar a interface com dados fictíci
 4. Na visão geral, clique em **Buscar portas**, selecione **USB / Serial**, escolha a porta COM correspondente ao seu equipamento e clique em **Conectar dispositivo**.
 5. Aguarde a leitura. A conexão inicial pode levar cerca de 40 segundos, dependendo do dispositivo e do número de nós armazenados.
 
-No modo padrão, ao concluir o app **libera automaticamente a porta serial** e mantém uma cópia da leitura na memória. Você pode navegar e preparar rascunhos com a porta livre. Fora da escuta ativa, cada consulta ou aplicação abre uma conexão breve e a encerra ao terminar, inclusive em caso de falha.
+**Desktop** é a opção padrão da interface: **Conectar dispositivo** lê o rádio e mantém essa mesma conexão aberta, já recebendo mensagens. Não é preciso iniciar uma segunda escuta. Mensagens e configurações usam a conexão existente. Para guardar somente uma leitura e liberar a porta após cada operação, selecione **Leitura pontual** antes de conectar.
 
 #### Rede / TCP
 
@@ -69,7 +69,7 @@ No modo padrão, ao concluir o app **libera automaticamente a porta serial** e m
 3. Encerre a sessão atual, se houver. Na visão geral, selecione **Rede / TCP** em **Tipo de conexão**.
 4. Preencha a caixa **IP ou nome do rádio**, por exemplo `192.168.1.50` ou `radio.local`. Informe somente o endereço, sem `http://`, caminho ou porta. Nomes dependem da resolução disponível no computador; IPv6 também é aceito, sem colchetes.
 5. Mantenha **Porta TCP** em **4403**, salvo se o firmware utilizar outra porta, e clique em **Conectar dispositivo**.
-6. No modo padrão, após a leitura a conexão TCP é encerrada automaticamente. Consultas, aplicação de configurações e mensagens usam esse mesmo endereço em conexões breves. A identidade do rádio é conferida novamente antes de qualquer operação, inclusive se o IP passar a apontar para outro aparelho.
+6. Em **Desktop**, a primeira conexão TCP permanece aberta para mensagens e configurações. Em **Leitura pontual**, ela é encerrada após cada operação. A identidade do rádio é conferida em cada nova conexão, inclusive se o IP passar a apontar para outro aparelho.
 
 O TCP conecta diretamente à Client API do rádio; não depende de MQTT. A interface web continua em **http://127.0.0.1:8765**, no computador que executa o servidor. A escolha TCP não publica o app na rede. A API TCP do rádio deve ser utilizada em rede confiável, sem encaminhar sua porta para a internet.
 
@@ -81,7 +81,7 @@ Explore as configurações pelo menu lateral. Se uma seção não veio na conex�
 
 ### 6. Encerrar e usar novamente
 
-No modo padrão, a conexão com o rádio já é encerrada depois de cada operação. Na escuta ativa, use **Parar recepção** ou **Encerrar sessão** para liberá-la. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
+Em **Desktop**, use **Desconectar** na página Mensagens para liberar o rádio e preservar o histórico na sessão. **Conectar ao rádio** retoma a recepção. Em **Leitura pontual**, a conexão é encerrada depois de cada operação. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
 
 Nas próximas utilizações, abra o PowerShell na pasta `meshtastic-studio` e execute novamente:
 
@@ -186,9 +186,9 @@ Cada aplicação modifica **uma seção**. Não há transação atômica entre v
 2. Em **Conversa**, escolha um canal habilitado ou uma conversa direta com um nó conhecido. Para uma mensagem direta, selecione também o canal de envio compartilhado com o destinatário.
 3. Escreva até **233 bytes UTF-8**; letras acentuadas e emojis podem ocupar mais de um byte. Clique em **Enviar** ou pressione **Enter**. **Shift+Enter** insere uma quebra de linha. Não há modal de revisão de mensagens.
 4. O envio real exige iniciar com `./start.ps1 -AllowWrites`. Em modo somente leitura, a recepção permanece disponível, mas mensagens não são transmitidas. No simulador, os envios são fictícios.
-5. Para receber, clique em **Receber por 30 segundos**. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Parar recepção** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
+5. Em **Desktop**, a recepção já está ativa. A opção **Receber por 30 segundos** fica dentro de **Sobre recepção e entrega**, para uso pontual. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Desconectar** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
 
-No modo padrão, o app abre a conexão USB ou TCP apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Na opção de 30 segundos, fechar a aba não prolonga a recepção: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
+Em **Desktop**, a recepção começa na primeira conexão e permanece ativa ao navegar. Em **Leitura pontual**, o app abre a conexão USB ou TCP apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Na opção de 30 segundos, fechar a aba não prolonga a recepção: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
 
 O campo é liberado imediatamente após clicar em Enviar. Você pode escrever o próximo rascunho e trocar de conversa enquanto o app aguarda a confirmação da mensagem atual. O app envia uma mensagem por vez; Enter repetido ou clique duplo não gera um segundo envio enquanto o primeiro está em andamento. Texto vazio ou acima do limite de bytes mantém Enviar desabilitado.
 
@@ -197,10 +197,10 @@ Se houver falha antes do envio, o texto volta ao editor quando ele estiver vazio
 ### Escuta ativa: usar o desktop como interface principal
 
 1. Leia o rádio por **USB / Serial** ou **Rede / TCP**, conforme suporte do firmware.
-2. Abra **Mensagens** e clique em **Iniciar escuta ativa**. Aguarde o estado **Escuta ativa**; a conexão inicial pode levar vários segundos. **Parar recepção** também funciona durante essa preparação e libera o rádio depois que o handshake terminar ou expirar.
+2. Abra **Mensagens**: o estado deve indicar **Conectado · recebendo mensagens**. Se houver somente uma leitura salva ou a conexão tiver sido encerrada, clique em **Conectar ao rádio**. A conexão inicial pode levar vários segundos. **Desconectar** também funciona durante essa preparação e libera o rádio depois que o handshake terminar ou expirar.
 3. A conexão permanece aberta, sem limite de 30 segundos, capturando mensagens dos canais e diretas. Você pode trocar de conversa, escrever e enviar pela mesma conexão enquanto recebe. Antes de cada envio real, o app relê o canal e a configuração LoRa para detectar mudanças desde a validação do envio. Nenhum envio é automático.
 4. É possível navegar pelo app, consultar seções e aplicar configurações com as mesmas proteções de revisão e confirmação. Essas operações utilizam a conexão existente; nenhuma segunda porta ou socket é aberto. Operações administrativas e envios são feitos um de cada vez, enquanto o leitor recebe pacotes em segundo plano.
-5. Clique em **Parar recepção** para fechar a conexão e conservar o histórico, ou em **Encerrar sessão** para fechar e apagar o histórico. Se houver um envio ou consulta em andamento, o encerramento espera essa operação terminar.
+5. Clique em **Desconectar** para fechar a conexão e conservar o histórico, ou em **Encerrar sessão** para fechar e apagar o histórico. Se houver um envio ou consulta em andamento, o encerramento espera essa operação terminar.
 
 **A escuta ativa continua ao mudar de página ou fechar a aba do navegador.** Ela termina ao parar explicitamente, encerrar a sessão, desligar o servidor ou perder a conexão. Para continuar após uma queda, confira a conexão e inicie novamente; não há reconexão automática nem repetição de mensagens. Uma alteração de configuração que reinicie o rádio também pode interromper a escuta.
 
@@ -225,7 +225,7 @@ No simulador, **Simular recebimento** adiciona uma mensagem de canal e uma diret
 
 ## T-Deck: tela, GPS e conectividade
 
-A [Meshtastic UI compartilha a Client API com os clientes externos](https://meshtastic.org/docs/configuration/device-uis/meshtasticui/#accessing-the-client-api). Uma conexão serial mantida aberta pode impedir que a Home atualize indicadores como Wi-Fi e MQTT. Por isso o Mesh Studio libera a porta ao terminar cada operação, sem depender de fechar a aba ou de um temporizador de inatividade. Durante uma consulta ou aplicação a tela ainda pode pausar por alguns instantes; uma nova conexão pode levar cerca de 40 segundos. Não há consulta automática contínua ao rádio. Na página Mensagens, o navegador atualiza somente o histórico em memória; receber novos pacotes exige uma janela de recepção explícita. O app mostra o horário da última consulta ao rádio; cada seção mantém sua última leitura, e a telemetria pode ser mais antiga.
+A [Meshtastic UI compartilha a Client API com os clientes externos](https://meshtastic.org/docs/configuration/device-uis/meshtasticui/#accessing-the-client-api). Uma conexão serial mantida aberta pode impedir que a Home atualize indicadores como Wi-Fi e MQTT. Em **Desktop**, a conexão fica aberta para usar o computador como interface de mensagens. Use **Desconectar** em Mensagens para liberá-la. A opção **Leitura pontual** libera a porta ao terminar cada operação. Uma nova conexão pode levar cerca de 40 segundos; o modo desktop evita repetir essa espera entre operações. Se houver uma queda, o app mostra o estado desconectado e exige uma reconexão explícita; não repete mensagens automaticamente. O horário da leitura e os valores das configurações não garantem telemetria recente.
 
 - **GPS:** use `gps_mode`. O antigo `gps_enabled` é obsoleto e seu valor não indica o estado atual do GPS. GPS habilitado não garante coordenadas: é necessário obter uma posição dos satélites.
 - **Campos obsoletos:** o formulário os apresenta somente em “Campos obsoletos · somente leitura”. Alterações pelo JSON/API são rejeitadas; omitir esses campos preserva o valor existente, inclusive em estruturas internas. A indicação vem do protocolo instalado, não de uma detecção completa das capacidades de cada firmware.

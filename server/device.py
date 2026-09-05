@@ -370,10 +370,10 @@ class RealDevice:
 
 
 class DeviceSession:
-    """Keep a snapshot, borrowing the transport only during explicit I/O."""
+    """Keep the snapshot; the manager owns any continuous operation."""
     demo = False
 
-    def __init__(self, port=None, *, host=None, tcp_port=4403):
+    def __init__(self, port=None, *, host=None, tcp_port=4403, read_initial=True):
         self.port = port
         self.host, self.tcp_port = host, tcp_port
         self.node_id = None
@@ -385,8 +385,10 @@ class DeviceSession:
         self.message_packets = 0
         self.messages = MessageBox()
         self.observed_at = None
-        with self.operation():
-            pass
+        self.connection_mode = 'brief' if read_initial else 'desktop'
+        if read_initial:
+            with self.operation():
+                pass
 
     def connected(self):
         return bool(self.transport and self.transport.connected())
@@ -401,6 +403,7 @@ class DeviceSession:
             accepted = True
             self.node_id = dev.node_id
             self.transport = dev
+            self.port = dev.port
             # Keep optional sections that are not part of the initial handshake.
             dev.entries = {**self.entries, **dev.entries}
             self.entries = dev.entries

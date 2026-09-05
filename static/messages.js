@@ -1,4 +1,4 @@
-export function createChat({api, esc, icon, getState, task, notify, refreshState}) {
+export function createChat({api, esc, icon, getState, task, notify, refreshState, isBusy}) {
   let data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false}, target='', timer, sending=false, viewBusy=false, generation=0;
   const drafts=new Map();
   const failedMessages=new Map();
@@ -20,28 +20,30 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
   }).join('');}
   function feed(){
     const messages=data.messages.filter(m=>m.conversation===target);
-    return messages.map(m=>`<article class="chat-message ${m.direction==='out'?'outgoing':''}"><div class="chat-meta">${esc(m.direction==='out'?'Você':peerName(m.sender))} · ${esc(new Date(m.time).toLocaleTimeString('pt-BR'))}${m.via_mqtt?' · via MQTT':''}</div><p>${esc(m.text)}</p><div class="chat-meta">${esc(status[m.status]||m.status)}</div></article>`).join('')||'<div class="empty"><h3>Nenhuma mensagem capturada nesta conversa</h3><p>Inicie a escuta ativa, receba por 30 segundos ou teste no simulador.</p></div>';
+    return messages.map(m=>`<article class="chat-message ${m.direction==='out'?'outgoing':''}"><div class="chat-meta">${esc(m.direction==='out'?'Você':peerName(m.sender))} · ${esc(new Date(m.time).toLocaleTimeString('pt-BR'))}${m.via_mqtt?' · via MQTT':''}</div><p>${esc(m.text)}</p><div class="chat-meta">${esc(status[m.status]||m.status)}</div></article>`).join('')||'<div class="empty"><h3>Nenhuma mensagem capturada nesta conversa</h3><p>As mensagens recebidas aparecerão aqui enquanto o rádio estiver conectado.</p></div>';
   }
   function receiveStatus(){
-    if(data.active_phase==='starting')return 'Iniciando escuta ativa. Aguarde a conexão com o rádio.';
-    if(data.active_phase==='stopping')return 'Encerrando escuta ativa. A comunicação em andamento precisa terminar para liberar o rádio.';
-    if(data.active_phase==='active')return 'Escuta ativa: conexão aberta para receber e enviar pelo desktop. A tela do aparelho pode pausar as atualizações.';
-    if(data.listen_error)return data.listen_error;
-    return data.listening?'Recepção por 30 segundos em andamento. A conexão será encerrada ao terminar ou parar.':'Recepção pausada. A conexão fica encerrada entre operações.';
+    if(data.active_phase==='starting')return 'Conectando ao rádio…';
+    if(data.active_phase==='stopping')return 'Desconectando… Aguardando a comunicação em andamento terminar.';
+    if(data.active_phase==='active')return 'Conectado · recebendo mensagens';
+    if(data.listen_error)return 'Não foi possível manter a conexão. Use Conectar ao rádio para tentar novamente.';
+    return data.listening?'Recepção por 30 segundos em andamento. A conexão será encerrada ao terminar ou parar.':'Rádio desconectado · histórico preservado nesta sessão';
   }
+  function disconnectedDesktop(){return !getState().demo&&getState().connection_mode==='desktop'&&data.active_phase!=='active';}
   function activePending(){return ['starting','stopping'].includes(data.active_phase);}
   function updateReceptionButtons(){
-    if($('#chat-stop'))$('#chat-stop').disabled=!data.listening;
-    if($('#chat-active'))$('#chat-active').disabled=data.listening||!getState().session_active;
-    if($('#chat-receive'))$('#chat-receive').disabled=data.listening||!getState().session_active;
+    if($('#chat-stop')){$('#chat-stop').disabled=!data.listening||data.active_phase==='stopping';$('#chat-stop').hidden=!data.listening;}
+    if($('#chat-active')){$('#chat-active').disabled=viewBusy||data.listening||!getState().session_active;$('#chat-active').hidden=data.listening;}
+    if($('#chat-receive'))$('#chat-receive').disabled=viewBusy||data.listening||!getState().session_active;
+    if($('#chat-connection-error')){$('#chat-connection-error').hidden=!data.listen_error;$('#chat-connection-detail').textContent=data.listen_error||'';}
   }
   async function poll(){
     try{
       const next=await api('messages');
-      if(next.epoch!==getState().epoch){pausePolling();notify('A sessão mudou. Recarregue a página antes de continuar.',true);return;}
+      if(next.epoch!==getState().epoch){if(isBusy())return;pausePolling();notify('A sessão mudou. Recarregue a página antes de continuar.',true);return;}
       const changed=next.active_phase!==data.active_phase;
       data=next;
-      if(changed){getState().active_phase=next.active_phase;if(!activePending())await refreshState();if($('#chat-target')&&!sending)await task(async()=>{});}
+      if(changed){getState().active_phase=next.active_phase;if(!activePending())await refreshState();if(!sending)await task(async()=>{});}
       const recipient=$('#chat-target');
       if(recipient){const markup=optionMarkup();if(markup&&recipient.innerHTML!==markup)recipient.innerHTML=markup;}
       const list=$('#chat-feed');
@@ -50,11 +52,14 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
       updateReceptionButtons();updateCount();
     }catch{/* A failed local poll must never trigger a device reconnection. */}
   }
+  function watch(){if(!timer){timer=setInterval(poll,1500);poll();}}
   function pausePolling(){clearInterval(timer);timer=null;}
   function render(state,busy){
     viewBusy=busy;
+    data.active_phase=state.active_phase||'off';
+    data.listening=['starting','active','stopping'].includes(data.active_phase)||data.listening&&data.listen_mode==='window';
     const opts=options();if(!opts.some(o=>o.id===target))target=opts[0]?.id||'';
-    return `<section class="card chat-panel"><div class="chat-toolbar"><label>Conversa<select id="chat-target" ${busy?'disabled':''}>${opts.map(o=>`<option value="${esc(o.id)}" ${o.id===target?'selected':''}>${esc(o.label)}</option>`).join('')||'<option>Leia um dispositivo para começar</option>'}</select></label><div class="actions"><button class="btn primary" id="chat-active" ${busy||data.listening||!state.session_active?'disabled':''}>Iniciar escuta ativa</button><button class="btn ghost" id="chat-receive" ${busy||data.listening||!state.session_active?'disabled':''}>${icon('download')}${state.demo?'Simular recebimento':'Receber por 30 segundos'}</button><button class="btn ghost" id="chat-stop" ${data.listening?'':'disabled'}>Parar recepção</button></div></div><p id="chat-receive-status" class="field-hint" role="status">${esc(receiveStatus())}</p><h2 id="chat-title">${esc(title())}</h2><div id="chat-feed" class="chat-feed" role="log" aria-label="Mensagens da conversa" aria-live="polite">${feed()}</div><label id="chat-channel-label">Canal de envio<select id="chat-channel" ${busy?'disabled':''}>${opts.filter(o=>o.id.startsWith('channel:')).map(o=>`<option value="${o.id.slice(8)}">${esc(o.label)}</option>`).join('')}</select></label><label class="chat-composer">Mensagem<textarea id="chat-text" rows="2" placeholder="Escreva uma mensagem…" ${busy||!state.session_active?'disabled':''}>${esc(drafts.get(target)||'')}</textarea></label><div class="chat-footer"><span id="chat-bytes" class="field-hint"></span><button class="btn primary" id="chat-send" disabled>${icon('arrow')}Enviar</button></div><div id="chat-send-status" class="field-hint" role="status" aria-live="polite"></div><div id="chat-recovery"></div><p class="field-hint">Enter envia · Shift+Enter quebra a linha</p>${state.session_active&&!state.writes_enabled?'<p class="field-hint">Envios bloqueados no modo somente leitura. A recepção continua disponível.</p>':''}<details class="chat-help"><summary>Sobre recepção e entrega</summary><p class="field-hint">A escuta ativa continua ao navegar no app ou fechar a aba. Use Parar recepção ou Encerrar sessão para liberar o rádio. Se a conexão cair, inicie a escuta novamente; não há reconexão automática.</p><p class="field-hint">O histórico contém até 300 mensagens capturadas nesta sessão. Não importa o histórico completo do rádio e pode perder mensagens enquanto o app está desconectado. Encerrar a sessão ou reiniciar o servidor apaga este histórico.</p><p class="field-hint">Para mensagens diretas, escolha o canal compartilhado com o destinatário. ACK de rede não confirma leitura nem entrega a todos os membros de um canal. Uma falha de confirmação não provoca reenvio automático.</p></details></section>`;
+    return `<section class="card chat-panel"><div class="chat-toolbar"><label>Conversa<select id="chat-target" ${busy?'disabled':''}>${opts.map(o=>`<option value="${esc(o.id)}" ${o.id===target?'selected':''}>${esc(o.label)}</option>`).join('')||'<option>Leia um dispositivo para começar</option>'}</select></label><div class="actions"><button class="btn primary" id="chat-active" ${busy||data.listening||!state.session_active?'disabled':''}>Conectar ao rádio</button><button class="btn ghost" id="chat-stop" ${data.listening?'':'disabled'}>Desconectar</button></div></div><p id="chat-receive-status" class="field-hint" role="status">${esc(receiveStatus())}</p><details id="chat-connection-error" class="chat-help" hidden><summary>Detalhes da conexão</summary><p id="chat-connection-detail" class="field-hint"></p></details><h2 id="chat-title">${esc(title())}</h2><div id="chat-feed" class="chat-feed" role="log" aria-label="Mensagens da conversa" aria-live="polite">${feed()}</div><label id="chat-channel-label">Canal de envio<select id="chat-channel" ${busy?'disabled':''}>${opts.filter(o=>o.id.startsWith('channel:')).map(o=>`<option value="${o.id.slice(8)}">${esc(o.label)}</option>`).join('')}</select></label><label class="chat-composer">Mensagem<textarea id="chat-text" rows="2" placeholder="Escreva uma mensagem…" ${busy||!state.session_active?'disabled':''}>${esc(drafts.get(target)||'')}</textarea></label><div class="chat-footer"><span id="chat-bytes" class="field-hint"></span><button class="btn primary" id="chat-send" disabled>${icon('arrow')}Enviar</button></div><div id="chat-send-status" class="field-hint" role="status" aria-live="polite"></div><div id="chat-recovery"></div><p class="field-hint">Enter envia · Shift+Enter quebra a linha</p>${state.session_active&&!state.writes_enabled?'<p class="field-hint">Envios bloqueados no modo somente leitura. A recepção continua disponível.</p>':''}<details class="chat-help"><summary>Sobre recepção e entrega</summary><button class="btn ghost" id="chat-receive" ${busy||data.listening||!state.session_active?'disabled':''}>${icon('download')}${state.demo?'Simular recebimento':'Receber por 30 segundos'}</button><p class="field-hint">A escuta ativa continua ao navegar no app ou fechar a aba. Use Desconectar ou Encerrar sessão para liberar o rádio. Se a conexão cair, use Conectar ao rádio novamente; não há reconexão automática.</p><p class="field-hint">O histórico contém até 300 mensagens capturadas nesta sessão. Não importa o histórico completo do rádio e pode perder mensagens enquanto o app está desconectado. Encerrar a sessão ou reiniciar o servidor apaga este histórico.</p><p class="field-hint">Para mensagens diretas, escolha o canal compartilhado com o destinatário. ACK de rede não confirma leitura nem entrega a todos os membros de um canal. Uma falha de confirmação não provoca reenvio automático.</p></details></section>`;
   }
   function updateRecovery(){
     const el=$('#chat-recovery'), item=failedMessages.get(target);
@@ -76,14 +81,14 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
       $('#chat-bytes').classList.toggle('over-limit',bytes>data.max_bytes);
     }
     if($('#chat-send')){
-      $('#chat-send').disabled=viewBusy||sending||activePending()||!getState().writes_enabled||!target||!valid;
+      $('#chat-send').disabled=viewBusy||sending||activePending()||disconnectedDesktop()||!getState().writes_enabled||!target||!valid;
       $('#chat-send').innerHTML=icon('arrow')+(sending?'Enviando…':'Enviar');
     }
     if($('#chat-send-status'))$('#chat-send-status').textContent=sending?'Enviando. Você pode continuar escrevendo a próxima mensagem.':'';
     updateRecovery();
   }
   async function sendMessage(){
-    if(sending||viewBusy||activePending()||!getState().writes_enabled||!target)return;
+    if(sending||viewBusy||activePending()||disconnectedDesktop()||!getState().writes_enabled||!target)return;
     const input=$('#chat-text'), text=input?.value||'';
     if(!text.trim()||text.includes('\0')||new TextEncoder().encode(text).length>data.max_bytes)return;
     const conversation=target, version=generation, epoch=getState().epoch;
@@ -128,8 +133,8 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
     $('#chat-channel').onchange=e=>channelSelections.set(target,e.target.value);
     $('#chat-target').onchange=e=>{target=e.target.value;task(async()=>{});};
     $('#chat-text').oninput=e=>{drafts.set(target,e.target.value);updateCount();};
-    $('#chat-active').onclick=()=>task(async()=>{data=await api('messages/active',{});getState().active_phase=data.active_phase;await poll();},'Escuta solicitada. Acompanhe o estado da conexão.');
-    $('#chat-stop').onclick=async()=>{try{await api('messages/stop',{});await poll();notify('Parada solicitada. A conexão será encerrada ao concluir a comunicação atual.');}catch(e){notify(e.message,true);}};
+    $('#chat-active').onclick=()=>task(async()=>{data=await api('messages/active',{});getState().active_phase=data.active_phase;await poll();});
+    $('#chat-stop').onclick=async()=>{try{await api('messages/stop',{});await poll();}catch(e){notify(e.message,true);}};
     $('#chat-receive').onclick=()=>task(async()=>{try{data=await api('messages/receive',{});}finally{await refreshState();await poll();}},'Janela de recepção encerrada. Conexão encerrada.');
     $('#chat-send').onclick=sendMessage;
     $('#chat-text').onkeydown=e=>{
@@ -137,8 +142,8 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
         e.preventDefault();if(!e.repeat)sendMessage();
       }
     };
-    updateCount();pausePolling();poll();timer=setInterval(poll,1500);
+    updateReceptionButtons();updateCount();pausePolling();poll();timer=setInterval(poll,1500);
   }
   function reset(){generation++;sending=false;failedMessages.clear();pausePolling();data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false};drafts.clear();channelSelections.clear();target='';}
-  return {render,bind,pausePolling,reset,hasDrafts:()=>sending||failedMessages.size>0||[...drafts.values()].some(t=>t.trim())};
+  return {render,bind,watch,pausePolling,reset,hasDrafts:()=>sending||failedMessages.size>0||[...drafts.values()].some(t=>t.trim())};
 }

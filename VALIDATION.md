@@ -1,5 +1,14 @@
 # Validação inicial — 5 de setembro de 2026
 
+
+## Atualização: conectar e receber em uma única conexão
+
+- **123 testes de backend aprovados.** Em Desktop, a conexão inicial é transferida à recepção contínua sem fechar a porta nem repetir o handshake. Testes em transportes USB e TCP simulados verificam uma única abertura para receber, enviar a canais/destinatários e consultar configurações.
+- Cobertos também: modo somente leitura, queda sem reconexão implícita, retomada explícita, falha na criação do leitor, falha no handshake, cancelamento durante a conexão inicial e parada na transferência para o leitor. Cada transporte aberto é encerrado uma única vez.
+- Navegador aprovado em desktop e celular: seleção Desktop/Leitura pontual, corpo da conexão, estado conectado com recepção, botão Desconectar, envio direto sem modal, preservação de rascunhos e navegação pelas configurações. A página Mensagens não exibe avisos de revisão de configuração. O navegador consulta somente o estado em memória para acompanhar a conexão nas demais páginas.
+- Servidor local atualizado na porta 8765. A tentativa no T-Deck físico ainda terminou em timeout no handshake USB, com a porta reconhecida pelo Windows. Portanto, a validação desta mudança com conexão física contínua permanece pendente; a correção evita a abertura duplicada, mas não comprova a recuperação dessa falha de comunicação.
+- Nenhuma mensagem real ou gravação de configuração foi enviada durante esta validação. A leitura pública anterior e seus contadores foram preservados em memória; segredos não foram reconstruídos a partir dos valores ocultos.
+
 ## Atualização: envio direto de mensagens
 
 - Removida a modal de revisão de mensagens. O botão Enviar e a tecla Enter validam e enviam diretamente; Shift+Enter insere uma quebra de linha. As autorizações de uso único, conferência de destino/canal e bloqueio de escrita continuam no servidor.

@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class ConnectBody(BaseModel):
     transport: Literal["serial", "tcp"] = "serial"
+    mode: Literal["brief", "desktop"] = "brief"
     port: str | None = Field(default=None, min_length=1, max_length=80)
     host: str | None = Field(default=None, min_length=1, max_length=253)
     tcp_port: int = Field(default=4403, ge=1, le=65535, strict=True)
@@ -97,6 +98,8 @@ class Manager(Messaging):
                 raise HTTPException(409, "Aguarde a escuta ativa conectar ou encerrar antes de continuar.")
             yield self.active_transport
             return
+        if getattr(dev, 'connection_mode', 'brief') == 'desktop':
+            raise HTTPException(409, "O rádio está desconectado. Use Conectar ao rádio em Mensagens para retomar.")
         with dev.operation() if isinstance(dev, DeviceSession) else nullcontext(dev) as transport:
             yield transport
 
@@ -117,6 +120,7 @@ class Manager(Messaging):
         with self.lock:
             dev = self.device
             return {"session_active": dev is not None,
+                    "connection_mode": getattr(dev, 'connection_mode', 'brief'),
                     "active_phase": self.active_phase,
                     "observed_at": getattr(dev, "observed_at", None),
                     "connected": bool(dev and dev.connected()), "demo": bool(dev and dev.demo),
@@ -148,14 +152,32 @@ class Manager(Messaging):
         finally:
             self.disconnecting = False
 
-    def connect(self, port=None, demo=False, *, host=None, tcp_port=4403):
+    def connect(self, port=None, demo=False, *, host=None, tcp_port=4403, mode='brief'):
         with self.lock:
-            if self.device:
+            if self.device or self.disconnecting:
                 raise HTTPException(409, "Desconecte a sessão atual antes de abrir outra.")
             if not demo and not host and port not in {p.device for p in list_ports.comports()}:
                 raise HTTPException(400, "Escolha uma porta serial presente nesta máquina.")
-            self.device = DemoDevice() if demo else (DeviceSession(host=host, tcp_port=tcp_port) if host else DeviceSession(port))
+            self.device = DemoDevice() if demo else DeviceSession(port, host=host, tcp_port=tcp_port, read_initial=mode != 'desktop')
             self.epoch = secrets.token_hex(16)
+            if not demo and mode == 'desktop':
+                self.active_stop.clear()
+                self.active_phase = 'starting'
+                try:
+                    context = self.device.operation()
+                    transport = context.__enter__()
+                    if self.disconnecting or self.active_stop.is_set():
+                        context.__exit__(None, None, None)
+                        raise HTTPException(409, "Conexão cancelada. O rádio foi liberado.")
+                    # Transfer the initial connection to the receiver, without a
+                    # disconnect or second handshake between these steps.
+                    self.launch_active(context, transport)
+                except Exception:
+                    self.device = None
+                    self.active_phase = 'off'
+                    raise
+                self.log('Conectado', 'Conexão aberta para receber, enviar e consultar pelo desktop.')
+                return self.state()
             self.log("Demonstração" if demo else "Leitura concluída", "Dispositivo simulado, sem acesso ao rádio." if demo else f"Leitura de {self.device.port} concluída; conexão encerrada automaticamente. Nenhuma configuração enviada.")
             return self.state()
 
@@ -324,7 +346,7 @@ def create_app(manager=None):
     @app.post("/api/connect")
     def connect(body: ConnectBody, request: Request):
         request.state.connection_transport = body.transport
-        return manager.connect(body.port, host=body.host, tcp_port=body.tcp_port)
+        return manager.connect(body.port, host=body.host, tcp_port=body.tcp_port, mode=body.mode)
 
     @app.post("/api/demo")
     def demo():

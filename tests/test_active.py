@@ -206,3 +206,114 @@ def test_wrong_radio_on_active_start_is_rejected(active_radio):
     c.post('/api/disconnect', json={}).raise_for_status()
     state = c.get('/api/messages').json()
     assert state['active_phase'] == 'off' and not state['listen_error']
+
+
+def connect_desktop(client, manager, opened):
+    dev = manager.device
+    endpoint = {'transport': 'tcp', 'host': dev.host} if dev.host else {'port': dev.port}
+    client.post('/api/disconnect', json={}).raise_for_status()
+    opened.clear()
+    return client.post('/api/connect', json={**endpoint, 'mode': 'desktop'})
+
+
+def test_desktop_connect_receives_and_sends_on_first_connection(active_radio):
+    c, m, radio, opened, _ = active_radio
+    response = connect_desktop(c, m, opened)
+    response.raise_for_status()
+    state = response.json()
+    assert state['connected'] and state['active_phase'] == 'active'
+    assert state['connection_mode'] == 'desktop'
+    assert len(opened) == 1 and opened[0].close_count == 0
+    assert c.get('/api/messages').json()['listening']
+    m.active_transport.messages.receive({'from': 0xde000002, 'to': BROADCAST,
+        'channel': 1, 'id': 901, 'decoded': {'portnum': 'TEXT_MESSAGE_APP', 'text': 'First connection'}}, m.device.node_id)
+    assert len(c.get('/api/messages').json()['messages']) == 1
+    for destination in (None, '!de000002'):
+        grant = c.post('/api/messages/preview', json={'text': 'Desktop', 'channel': 1, 'destination': destination}).json()
+        c.post('/api/messages/send', json={'token': grant['token']}).raise_for_status()
+    c.post('/api/read/config.lora', json={}).raise_for_status()
+    assert len(opened) == 1 and radio.writes == 0
+    stop(c, m)
+    assert opened[0].close_count == 1
+    # Desktop operations cannot silently reopen after the user disconnects.
+    assert c.post('/api/read/config.lora', json={}).status_code == 409
+    assert len(opened) == 1 and len(m.device.messages.snapshot()) == 3
+    start(c, m)
+    assert len(opened) == 2
+
+
+def test_desktop_drop_blocks_operations_without_reconnecting(active_radio):
+    c, m, radio, opened, _ = active_radio
+    m.allow_writes = False
+    connect_desktop(c, m, opened).raise_for_status()
+    assert not c.get('/api/messages').json()['can_send']
+    m.active_transport.active = False
+    until(lambda: m.active_thread is None)
+    assert c.get('/api/state').json()['connected'] is False
+    assert m.active_phase == 'error'
+    assert c.post('/api/refresh', json={}).status_code == 409
+    assert len(opened) == 1 and opened[0].close_count == 1 and radio.writes == 0
+
+
+def test_desktop_worker_start_failure_releases_initial_connection(active_radio, monkeypatch):
+    c, m, _, opened, _ = active_radio
+    original = threading.Thread.start
+
+    def fail_worker(self):
+        if self.name == 'desktop reception':
+            raise RuntimeError('Simulated thread failure')
+        return original(self)
+
+    monkeypatch.setattr(threading.Thread, 'start', fail_worker)
+    assert connect_desktop(c, m, opened).status_code == 503
+    assert m.device is None and m.active_thread is None and m.active_transport is None
+    assert len(opened) == 1 and opened[0].close_count == 1
+
+
+def test_desktop_stop_during_handoff_closes_initial_connection(active_radio, monkeypatch):
+    c, m, _, opened, _ = active_radio
+    original = threading.Thread.start
+
+    def stop_before_worker(self):
+        if self.name == 'desktop reception':
+            m.stop_reception()
+        return original(self)
+
+    monkeypatch.setattr(threading.Thread, 'start', stop_before_worker)
+    connect_desktop(c, m, opened).raise_for_status()
+    until(lambda: m.active_thread is None)
+    assert len(opened) == 1 and opened[0].close_count == 1
+    assert m.active_phase == 'off' and not m.device.connected()
+
+
+def test_desktop_initial_handshake_failure_does_not_leave_session(active_radio, monkeypatch):
+    c, m, _, opened, _ = active_radio
+    def fail(*args, **kwargs):
+        raise TimeoutError('Simulated handshake timeout')
+    monkeypatch.setattr('server.device.RealDevice', fail)
+    assert connect_desktop(c, m, opened).status_code == 503
+    assert m.device is None and m.active_thread is None and not opened
+
+
+def test_cancel_desktop_initial_handshake_releases_without_starting_receiver(active_radio, monkeypatch):
+    c, m, _, opened, transport = active_radio
+    entered, resume = threading.Event(), threading.Event()
+    original = transport.__init__
+    def delayed(self, *args, **kwargs):
+        entered.set()
+        assert resume.wait(5)
+        original(self, *args, **kwargs)
+    monkeypatch.setattr(transport, '__init__', delayed)
+    responses = []
+    connector = threading.Thread(target=lambda: responses.append(connect_desktop(c, m, opened)))
+    connector.start()
+    try:
+        assert entered.wait(5)
+        assert c.get('/api/messages').json()['active_phase'] == 'starting'
+        c.post('/api/messages/stop', json={}).raise_for_status()
+    finally:
+        resume.set()
+        connector.join(5)
+    assert responses[0].status_code == 409
+    assert m.device is None and m.active_thread is None
+    assert len(opened) == 1 and opened[0].close_count == 1

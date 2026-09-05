@@ -135,25 +135,38 @@ class Messaging:
                 self.require()
                 if self.active_thread or self.disconnecting:
                     raise HTTPException(409, "A escuta ativa já está iniciando, em andamento ou encerrando.")
-                self.active_stop.clear()
-                self.active_error = ''
-                self.active_phase = 'starting'
-                self.active_thread = threading.Thread(target=self._listen_active, name='desktop reception', daemon=True)
-                self.active_thread.start()
+                self.launch_active()
                 return self.message_state()
         finally:
             self.message_busy.release()
+
+    def launch_active(self, context=None, transport=None):
+        """Called under the manager lock; owns an already-entered context if supplied."""
+        self.active_stop.clear()
+        self.active_error = ''
+        self.active_transport = transport
+        self.active_phase = 'active' if transport else 'starting'
+        try:
+            self.active_thread = threading.Thread(target=self._listen_active,
+                args=(context, transport), name='desktop reception', daemon=True)
+            self.active_thread.start()
+        except Exception:
+            self.active_thread = None
+            self.active_transport = None
+            self.active_phase = 'off'
+            if context is not None:
+                context.__exit__(None, None, None)
+            raise
 
     def stop_reception(self):
         # Must remain usable while a handshake or a send owns the radio lock.
         self.listen_stop.set()
         self.active_stop.set()
-        if self.active_thread:
+        if self.active_thread or self.active_phase == 'starting':
             self.active_phase = 'stopping'
 
-    def _listen_active(self):
-        context = None
-        entered = False
+    def _listen_active(self, context=None, dev=None):
+        entered = context is not None
         failure = False
         error_detail = ''
         selected = None
@@ -162,9 +175,10 @@ class Messaging:
                 if self.active_stop.is_set():
                     return
                 selected = self.require()
-                context = selected.operation() if isinstance(selected, DeviceSession) else nullcontext(selected)
-                dev = context.__enter__()
-                entered = True
+                if not entered:
+                    context = selected.operation() if isinstance(selected, DeviceSession) else nullcontext(selected)
+                    dev = context.__enter__()
+                    entered = True
                 self.active_transport = dev
                 self.active_phase = 'stopping' if self.active_stop.is_set() else 'active'
                 if dev.demo:

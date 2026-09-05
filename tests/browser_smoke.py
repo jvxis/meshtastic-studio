@@ -154,22 +154,37 @@ def run():
             page.locator('nav [data-page="messages"]').click()
             page.locator('#chat-receive').click()
             expect(page.locator('#chat-feed')).to_contain_text('Mensagem de canal simulada')
+            held=[]
+            page.route('**/api/messages/send', lambda route: held.append(route))
             page.locator('#chat-text').fill('Olá canal! <script>window.chatInjected=true</script>')
-            page.locator('#chat-review').click()
-            expect(page.locator('#chat-send')).to_be_visible()
-            expect(page.locator('.chat-review-text')).to_contain_text('<script>')
             page.locator('#chat-send').click()
             expect(page.locator('#review-dialog')).not_to_be_visible()
-            expect(page.locator('#chat-feed')).to_contain_text('Envio simulado')
-            assert not page.evaluate('Boolean(window.chatInjected)')
             expect(page.locator('#chat-text')).to_have_value('')
+            expect(page.locator('#chat-send')).to_be_disabled()
+            page.locator('#chat-text').fill('Próxima mensagem em rascunho')
+            page.locator('#chat-text').press('Enter')
+            expect(page.locator('#chat-text')).to_have_value('Próxima mensagem em rascunho')
+            assert len(held)==1  # Repeated Enter while sending never submits twice.
+            page.locator('#chat-target').select_option('direct:!de000003')
+            page.locator('#chat-text').fill('Rascunho de outra conversa')
+            held[0].fulfill(response=held[0].fetch())
+            page.unroute('**/api/messages/send')
+            expect(page.locator('#chat-send-status')).to_be_empty()
+            expect(page.locator('#chat-text')).to_have_value('Rascunho de outra conversa')
+            page.locator('#chat-target').select_option('channel:0')
+            expect(page.locator('#chat-feed')).to_contain_text('Envio simulado')
+            expect(page.locator('#chat-feed')).to_contain_text('<script>')
+            assert not page.evaluate('Boolean(window.chatInjected)')
+            expect(page.locator('#chat-text')).to_have_value('Próxima mensagem em rascunho')
+            page.locator('#chat-text').fill('')
             page.locator('#chat-target').select_option('direct:!de000003')
             expect(page.locator('#chat-feed')).to_contain_text('Mensagem direta de demonstração')
             page.locator('#chat-channel').select_option('1')
             page.locator('#chat-text').fill('Olá, mensagem direta!')
-            page.locator('#chat-review').click()
-            expect(page.locator('.dialog-body')).to_contain_text('canal 1')
-            page.locator('#chat-send').click()
+            page.locator('#chat-text').press('Shift+Enter')
+            page.locator('#chat-text').press_sequentially('Segunda linha')
+            expect(page.locator('#chat-text')).to_have_value('Olá, mensagem direta!\nSegunda linha')
+            page.locator('#chat-text').press('Enter')
             expect(page.locator('#review-dialog')).not_to_be_visible()
             expect(page.locator('#chat-feed')).to_contain_text('Olá, mensagem direta!')
             expect(page.locator('#chat-channel')).to_have_value('1')
@@ -185,7 +200,6 @@ def run():
             expect(page.locator('#chat-stop')).to_be_enabled()
             expect(page.locator('#chat-receive')).to_be_disabled()
             page.locator('#chat-text').fill('Mensagem durante escuta ativa')
-            page.locator('#chat-review').click()
             page.locator('#chat-send').click()
             expect(page.locator('#review-dialog')).not_to_be_visible()
             expect(page.locator('#chat-feed')).to_contain_text('Mensagem durante escuta ativa')
@@ -205,6 +219,54 @@ def run():
             expect(page.locator('#chat-active')).to_be_enabled()
             page.set_viewport_size({'width': 1440, 'height': 1050})
 
+            expect(page.locator('#chat-send')).to_be_disabled()
+            page.locator('#chat-text').fill('😀'*59)
+            expect(page.locator('#chat-send')).to_be_disabled()
+            expect(page.locator('#chat-bytes')).to_contain_text('236 / 233')
+            page.locator('#chat-text').fill('')
+            rejected=[]
+            page.route('**/api/messages/preview',lambda route: rejected.append(route))
+            page.locator('#chat-text').fill('Texto que precisa ser preservado')
+            page.locator('#chat-send').click()
+            expect(page.locator('#chat-text')).to_have_value('')
+            page.locator('#chat-text').fill('Novo rascunho durante a validação')
+            assert len(rejected)==1
+            rejected[0].fulfill(status=409,json={'detail':'Falha de validação simulada'})
+            page.unroute('**/api/messages/preview')
+            expect(page.locator('#chat-send-status')).to_be_empty()
+            expect(page.locator('#chat-text')).to_have_value('Novo rascunho durante a validação')
+            page.locator('#chat-recovery summary').click()
+            expect(page.locator('#chat-recovery')).to_contain_text('Texto que precisa ser preservado')
+            page.locator('#chat-text').fill('')
+            page.locator('#chat-restore').click()
+            expect(page.locator('#chat-text')).to_have_value('Texto que precisa ser preservado')
+            page.locator('#chat-text').fill('')
+            assert len(errors)==1 and '409' in errors[0],errors
+            errors.clear()
+
+            interrupted=[]
+            page.route('**/api/messages/send',lambda route: interrupted.append(route))
+            page.locator('#chat-text').fill('Resposta perdida após envio simulado')
+            with page.expect_request('**/api/messages/send'):
+                page.locator('#chat-send').click()
+            expect(page.locator('#chat-text')).to_have_value('')
+            page.locator('#chat-text').fill('Rascunho após falha de rede')
+            assert len(interrupted)==1
+            response=interrupted[0].fetch()  # Simulator receives it; browser loses the response.
+            assert response.ok
+            interrupted[0].abort('failed')
+            page.unroute('**/api/messages/send')
+            expect(page.locator('#toast')).to_contain_text('Resultado desconhecido')
+            expect(page.locator('#chat-text')).to_have_value('Rascunho após falha de rede')
+            expect(page.locator('#chat-feed .chat-message').filter(has_text='Resposta perdida após envio simulado')).to_have_count(1)
+            page.locator('#chat-recovery summary').click()
+            expect(page.locator('#chat-recovery')).to_contain_text('Resultado desconhecido')
+            page.locator('#chat-text').fill('')
+            page.locator('#chat-restore').click()
+            page.locator('#chat-text').fill('')
+            assert len(errors)==1 and 'ERR_FAILED' in errors[0],errors
+            errors.clear()
+
             page.locator('nav [data-page="overview"]').click()
             page.set_viewport_size({"width": 390, "height": 844})
             page.screenshot(path=str(ARTIFACTS / "demo-mobile.png"), full_page=True, animations="disabled")
@@ -221,9 +283,9 @@ def run():
         assert state["device"]["write_packets"] == 0
         assert state["device"]["simulated_writes"] == 1
         messages = httpx.get(url + '/api/messages').json()['messages']
-        assert len(messages) == 7
+        assert len(messages) == 8
         assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 1
-        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
+        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping", "direct send without modal", "Enter and Shift+Enter", "draft preservation during pending send", "duplicate submission prevention", "failed send text recovery", "lost response without automatic retry", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
         proc.terminate()
         proc.wait(timeout=10)

@@ -184,17 +184,21 @@ Cada aplicação modifica **uma seção**. Não há transação atômica entre v
 
 1. Leia seu rádio na visão geral e abra **Mensagens** no menu lateral.
 2. Em **Conversa**, escolha um canal habilitado ou uma conversa direta com um nó conhecido. Para uma mensagem direta, selecione também o canal de envio compartilhado com o destinatário.
-3. Escreva até **233 bytes UTF-8**; letras acentuadas e emojis podem ocupar mais de um byte. Clique em **Revisar mensagem**, confira o texto, o destino e o canal e confirme **Enviar mensagem**.
+3. Escreva até **233 bytes UTF-8**; letras acentuadas e emojis podem ocupar mais de um byte. Clique em **Enviar** ou pressione **Enter**. **Shift+Enter** insere uma quebra de linha. Não há modal de revisão de mensagens.
 4. O envio real exige iniciar com `./start.ps1 -AllowWrites`. Em modo somente leitura, a recepção permanece disponível, mas mensagens não são transmitidas. No simulador, os envios são fictícios.
 5. Para receber, clique em **Receber por 30 segundos**. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Parar recepção** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
 
 No modo padrão, o app abre a conexão USB ou TCP apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Na opção de 30 segundos, fechar a aba não prolonga a recepção: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
 
+O campo é liberado imediatamente após clicar em Enviar. Você pode escrever o próximo rascunho e trocar de conversa enquanto o app aguarda a confirmação da mensagem atual. O app envia uma mensagem por vez; Enter repetido ou clique duplo não gera um segundo envio enquanto o primeiro está em andamento. Texto vazio ou acima do limite de bytes mantém Enviar desabilitado.
+
+Se houver falha antes do envio, o texto volta ao editor quando ele estiver vazio. Se você já escreveu outro rascunho, ou se o resultado do envio for desconhecido, o texto original fica em **Texto preservado do envio com erro**, com a opção **Voltar ao editor**. Recuperar o texto não o envia. O app nunca repete uma transmissão automaticamente após uma falha de resposta.
+
 ### Escuta ativa: usar o desktop como interface principal
 
 1. Leia o rádio por **USB / Serial** ou **Rede / TCP**, conforme suporte do firmware.
 2. Abra **Mensagens** e clique em **Iniciar escuta ativa**. Aguarde o estado **Escuta ativa**; a conexão inicial pode levar vários segundos. **Parar recepção** também funciona durante essa preparação e libera o rádio depois que o handshake terminar ou expirar.
-3. A conexão permanece aberta, sem limite de 30 segundos, capturando mensagens dos canais e diretas. Você pode trocar de conversa, escrever, revisar e enviar pela mesma conexão enquanto recebe. Antes de cada envio real, o app relê o canal e a configuração LoRa para detectar mudanças desde a revisão. Nenhum envio é automático.
+3. A conexão permanece aberta, sem limite de 30 segundos, capturando mensagens dos canais e diretas. Você pode trocar de conversa, escrever e enviar pela mesma conexão enquanto recebe. Antes de cada envio real, o app relê o canal e a configuração LoRa para detectar mudanças desde a validação do envio. Nenhum envio é automático.
 4. É possível navegar pelo app, consultar seções e aplicar configurações com as mesmas proteções de revisão e confirmação. Essas operações utilizam a conexão existente; nenhuma segunda porta ou socket é aberto. Operações administrativas e envios são feitos um de cada vez, enquanto o leitor recebe pacotes em segundo plano.
 5. Clique em **Parar recepção** para fechar a conexão e conservar o histórico, ou em **Encerrar sessão** para fechar e apagar o histórico. Se houver um envio ou consulta em andamento, o encerramento espera essa operação terminar.
 
@@ -208,7 +212,7 @@ Mensagens enviadas pelo app não são espelhadas automaticamente no histórico d
 
 O histórico reúne até **300 mensagens**, apenas na memória da sessão do servidor. Inclui pacotes de texto recebidos durante operações do app, separados por canal ou pelo outro nó da conversa direta, com indicação MQTT quando presente. Não importa o histórico completo salvo pela MUI; mensagens recebidas pelo rádio enquanto o app está desconectado podem não chegar a este histórico. Recarregar a página conserva o histórico do servidor; encerrar a sessão ou reiniciar o servidor o apaga. Rascunhos de mensagens ficam na memória da página. Nenhum histórico é salvo em disco ou publicado no repositório.
 
-O envio utiliza a conexão da escuta ativa ou abre uma conexão breve, confere novamente o rádio, o canal e a configuração LoRa, envia um pacote de texto e aguarda confirmação de rede por até 15 segundos. A revisão é de uso único, válida por cinco minutos. Alterar o canal ou o rádio depois da revisão bloqueia o envio. O app não repete uma mensagem automaticamente; retransmissões do próprio protocolo no rádio ainda podem ocorrer.
+O envio utiliza a conexão da escuta ativa ou abre uma conexão breve, confere novamente o rádio, o canal e a configuração LoRa, envia um pacote de texto e aguarda confirmação de rede por até 15 segundos. Ao clicar em Enviar, a interface faz a validação e obtém uma autorização de uso único internamente, sem uma etapa de confirmação visual. Alterar o canal ou o rádio entre essa validação e a transmissão bloqueia o envio. O app não repete uma mensagem automaticamente; retransmissões do próprio protocolo no rádio ainda podem ocorrer.
 
 - **ACK de rede:** houve uma confirmação de rede; não significa que a pessoa leu a mensagem nem confirma entrega a todos os membros de um canal.
 - **Sem confirmação de rede:** nenhuma confirmação foi observada dentro da janela. A mensagem ainda pode ter chegado; uma confirmação tardia pode atualizar o histórico em uma recepção posterior.

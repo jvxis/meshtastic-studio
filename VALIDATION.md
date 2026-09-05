@@ -1,5 +1,13 @@
 # Validação inicial — 5 de setembro de 2026
 
+## Atualização: envio direto de mensagens
+
+- Removida a modal de revisão de mensagens. O botão Enviar e a tecla Enter validam e enviam diretamente; Shift+Enter insere uma quebra de linha. As autorizações de uso único, conferência de destino/canal e bloqueio de escrita continuam no servidor.
+- Testes de navegador aprovados em desktop e celular: envio em canal e direto sem modal, escolha do canal de mensagem direta, texto HTML exibido literalmente, Enter/Shift+Enter, limite UTF-8, envio durante escuta ativa e prevenção de submissão duplicada.
+- Uma resposta de envio foi retida no teste enquanto o usuário digitava outro rascunho e mudava de conversa. O novo texto e o destinatário original foram preservados. Foram testadas também rejeição de validação e perda de resposta após envio no simulador, sem reenvio automático nem perda do texto original.
+- Os textos de envios com erro podem ser recuperados no editor sem substituir um rascunho existente. As explicações de recepção e entrega ficam recolhidas, deixando mais espaço para o histórico.
+- Nenhuma mensagem real foi enviada e nenhuma configuração do aparelho foi modificada durante a validação. A atualização do frontend não exige reiniciar o servidor nem encerrar uma escuta ativa existente.
+
 ## Atualização: diagnóstico por tipo de conexão
 
 - **111 testes de backend aprovados**, incluindo oito novos casos de falha na conexão inicial e em consultas posteriores. Erros USB/Serial não mencionam TCP; recusas e falhas TCP mantêm as orientações de rede. Exceções internas não são expostas nas respostas nem nos eventos.

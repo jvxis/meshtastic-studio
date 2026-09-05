@@ -19,6 +19,7 @@ from serial.tools import list_ports
 from .schema import DEFINITIONS, OWNER_FIELDS, as_dict, public_schema, redact, prepare, diff
 from .device import DeviceSession, write_command
 from .demo import DemoDevice
+from .messaging import Messaging, MessageDraft, MessageSend
 from meshtastic.protobuf import mesh_pb2
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,7 +40,7 @@ class ApplyBody(BaseModel):
     confirmation: str = Field(max_length=100)
 
 
-class Manager:
+class Manager(Messaging):
     def __init__(self, allow_writes=False):
         self.allow_writes = allow_writes
         self.device = None
@@ -47,6 +48,7 @@ class Manager:
         self.epoch = secrets.token_hex(16)
         self.previews = {}
         self.events = []
+        self.init_messaging()
 
     def log(self, action, detail, level="info"):
         self.events.insert(0, {"time": datetime.now(timezone.utc).isoformat(), "action": action,
@@ -90,12 +92,14 @@ class Manager:
                     "nodes": dev.nodes() if dev else [], "events": self.events}
 
     def disconnect(self):
+        self.listen_stop.set()
         with self.lock:
             if self.device:
                 self.device.close()
                 self.log("Desconexão", "Porta liberada.")
             self.device = None
             self.previews.clear()
+            self.message_previews.clear()
             self.epoch = secrets.token_hex(16)
 
     def connect(self, port=None, demo=False):
@@ -301,6 +305,27 @@ def create_app(manager=None):
     @app.post("/api/apply")
     def apply(body: ApplyBody):
         return manager.apply(body)
+
+    @app.get("/api/messages")
+    def messages():
+        return manager.message_state()
+
+    @app.post("/api/messages/preview")
+    def preview_message(body: MessageDraft):
+        return manager.preview_message(body)
+
+    @app.post("/api/messages/send")
+    def send_message(body: MessageSend):
+        return manager.send_message(body)
+
+    @app.post("/api/messages/receive")
+    def receive_messages():
+        return manager.receive_messages()
+
+    @app.post("/api/messages/stop")
+    def stop_messages():
+        manager.listen_stop.set()
+        return {"stopping": True}
 
     @app.get("/")
     def index():

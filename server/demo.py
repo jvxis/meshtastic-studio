@@ -1,5 +1,6 @@
 """Synthetic device, never connected to a port. Used by the UI and tests."""
 import copy
+from .messages import MessageBox, BROADCAST
 import time
 from google.protobuf import json_format, message_factory
 from .schema import DEFINITIONS, as_dict
@@ -11,6 +12,8 @@ class DemoDevice:
     port = "SIMULADOR"
 
     def __init__(self):
+        self.messages = MessageBox()
+        self.message_packets = 0
         self.entries = {}
         self.writes = 0
         self.active = True
@@ -61,3 +64,16 @@ class DemoDevice:
 
     def close(self):
         self.active = False
+
+    def send_text(self, text, destination, channel, box, item_id):
+        self.message_packets += 1
+        box.update(item_id, status='simulated', packet_id=100000 + self.message_packets)
+
+    def simulate_incoming(self):
+        sequence = len(self.messages.snapshot())
+        self.messages.receive({'from': 0xde000002, 'to': BROADCAST, 'channel': 0,
+            'id': 200000 + sequence, 'decoded': {'portnum': 'TEXT_MESSAGE_APP',
+            'text': 'Olá, equipe! Mensagem de canal simulada.'}}, self.node_id)
+        self.messages.receive({'from': 0xde000003, 'to': int(self.node_id[1:], 16), 'channel': 0,
+            'id': 300000 + sequence, 'decoded': {'portnum': 'TEXT_MESSAGE_APP',
+            'text': 'Mensagem direta de demonstração.'}}, self.node_id)

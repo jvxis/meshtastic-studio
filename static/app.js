@@ -1,3 +1,4 @@
+import { createChat } from './messages.js';
 const $ = (selector, root = document) => root.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clone = value => structuredClone(value);
@@ -22,9 +23,9 @@ const paths = {
   settings:'M4 6h16M4 12h16M4 18h16M8 4v4M16 10v4M10 16v4', eye:'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0',
 };
 const icon = name => `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${paths[name] || paths.settings}"/></svg>`;
-const titles = {overview:'Visão geral',radio:'Rádio LoRa',connections:'Conexões',device:'Dispositivo',modules:'Módulos',channels:'Canais',nodes:'Nós da rede',screen:'Interface e extras',drafts:'Rascunhos'};
+const titles = {messages:'Mensagens',overview:'Visão geral',radio:'Rádio LoRa',connections:'Conexões',device:'Dispositivo',modules:'Módulos',channels:'Canais',nodes:'Nós da rede',screen:'Interface e extras',drafts:'Rascunhos'};
 const navGroups = [
-  ['CONTROLE', [['overview','home'],['radio','radio'],['connections','link'],['device','device'],['modules','modules']]],
+  ['CONTROLE', [['overview','home'],['messages','file'],['radio','radio'],['connections','link'],['device','device'],['modules','modules']]],
   ['REDE & PERSONALIZAÇÃO', [['channels','channels'],['nodes','nodes'],['screen','screen'],['drafts','file']]],
 ];
 const labels = {long_name:'Nome do dispositivo',short_name:'Nome curto',is_licensed:'Modo radioamador',is_unmessagable:'Ocultar opção de mensagem',
@@ -66,11 +67,11 @@ function go(next, key=''){page=next;selected=key;fieldSearch='';jsonMode=false;r
 function dirty(key){return drafts[key] && (errors[key] || JSON.stringify(drafts[key].values)!==JSON.stringify(drafts[key].original));}
 function dirtyKeys(){return Object.keys(drafts).filter(dirty);}
 function heading(title,description,actions=''){return `<div class="page-heading"><div><h1>${esc(title)}</h1><p>${esc(description)}</p></div>${actions?`<div class="actions">${actions}</div>`:''}</div>`;}
-function snapshotNotice(){return state.session_active&&!state.demo?`<div class="status-strip">${icon('usb')}<span><b>Porta liberada automaticamente.</b> Você está vendo a última leitura${state.observed_at?' de '+esc(new Date(state.observed_at).toLocaleString('pt-BR')):''}. Consultas e aplicações reconectam por alguns instantes; durante esse período a tela do rádio pode pausar as atualizações.</span></div>`:'';}
+function snapshotNotice(){if(state.session_active&&!state.demo&&(busy||applying))return '<div class="status-strip"><b>Operação em andamento.</b> A porta será liberada ao concluir. Durante a recepção, use Parar recepção para encerrar antes.</div>';return state.session_active&&!state.demo?`<div class="status-strip">${icon('usb')}<span><b>Porta liberada automaticamente.</b> Você está vendo a última leitura${state.observed_at?' de '+esc(new Date(state.observed_at).toLocaleString('pt-BR')):''}. Consultas e aplicações reconectam por alguns instantes; durante esse período a tela do rádio pode pausar as atualizações.</span></div>`:'';}
 function statusStrip(){return snapshotNotice()+ `<div class="status-strip ${state.demo?'demo':''}">${icon(state.demo?'code':'shield')}<span>${state.demo?'<b>Ambiente de demonstração.</b> Todos os dados são fictícios; as alterações são simuladas.':state.writes_enabled?'<b>Gravação habilitada.</b> Cada seção exige revisão e confirmação antes do envio.':'<b>Você está em modo de leitura.</b> Explore e prepare rascunhos. A gravação no dispositivo está bloqueada.'}</span><span class="end">${state.device?`${state.device.write_packets} gravações na serial`:'ACESSO LOCAL'}</span></div>`;}
 function render(){
   const current=state.device;
-  $('#app').innerHTML=`${busy?'<div class="busy-overlay" role="progressbar" aria-label="Operação em andamento"></div>':''}<div class="layout"><aside class="sidebar"><div class="brand"><span class="logo">${icon('mesh')}</span>Mesh Studio</div><div class="brand-sub">LOCAL CONTROL</div>${navGroups.map(([label,items])=>`<div class="nav-label">${label}</div><nav class="nav" aria-label="${label}">${items.map(([id,ic])=>`<button data-page="${id}" class="${page===id?'active':''}" ${page===id?'aria-current="page"':''}>${icon(ic)}${titles[id]}${id==='drafts'&&dirtyKeys().length?`<span class="badge-number">${dirtyKeys().length}</span>`:''}</button>`).join('')}</nav>`).join('')}<div class="sidebar-bottom"><div class="device-mini"><span class="eyebrow"><i class="dot ${state.session_active?'':'off'}"></i>${state.demo?'SIMULADOR':state.session_active?'LEITURA SALVA · PORTA LIVRE':'SEM SESSÃO'}</span><div class="mini-title">${esc(current?.name || 'Seu próximo ponto na rede')}</div><span class="mono tiny muted">${esc(current?`${current.id} · ${current.port}`:'USB / serial')}</span></div><div class="footer-note">${icon('lock')}Dados locais. Sem nuvem.</div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb"><button class="btn ghost mobile-menu" data-action="menu" aria-label="Abrir menu">${icon('menu')}</button><span>Workspace</span><span>/</span><b>${titles[page]}</b></div><div class="top-status"><span class="local-label muted"><i class="dot"></i>localhost</span>${modePill()}</div></header><div class="content">${page==='overview'?overview():page==='nodes'?nodesPage():page==='channels'&&!selected?channelsPage():page==='drafts'?draftsPage():settingsPage()}<footer class="page-foot"><span>Mesh Studio <span class="muted">/</span> Feito para explorar sua rede.</span><span>${state.demo?'DADOS DE DEMONSTRAÇÃO':state.session_active?`Última leitura · ${esc(current.port)} · porta liberada`:'Conexão direta com o seu Meshtastic'}</span></footer></div></main></div>`;
+  $('#app').innerHTML=`${busy?'<div class="busy-overlay" role="progressbar" aria-label="Operação em andamento"></div>':''}<div class="layout"><aside class="sidebar"><div class="brand"><span class="logo">${icon('mesh')}</span>Mesh Studio</div><div class="brand-sub">LOCAL CONTROL</div>${navGroups.map(([label,items])=>`<div class="nav-label">${label}</div><nav class="nav" aria-label="${label}">${items.map(([id,ic])=>`<button data-page="${id}" class="${page===id?'active':''}" ${page===id?'aria-current="page"':''}>${icon(ic)}${titles[id]}${id==='drafts'&&dirtyKeys().length?`<span class="badge-number">${dirtyKeys().length}</span>`:''}</button>`).join('')}</nav>`).join('')}<div class="sidebar-bottom"><div class="device-mini"><span class="eyebrow"><i class="dot ${state.session_active?'':'off'}"></i>${state.demo?'SIMULADOR':state.session_active?(busy?'OPERAÇÃO EM ANDAMENTO':'LEITURA SALVA · PORTA LIVRE'):'SEM SESSÃO'}</span><div class="mini-title">${esc(current?.name || 'Seu próximo ponto na rede')}</div><span class="mono tiny muted">${esc(current?`${current.id} · ${current.port}`:'USB / serial')}</span></div><div class="footer-note">${icon('lock')}Dados locais. Sem nuvem.</div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb"><button class="btn ghost mobile-menu" data-action="menu" aria-label="Abrir menu">${icon('menu')}</button><span>Workspace</span><span>/</span><b>${titles[page]}</b></div><div class="top-status"><span class="local-label muted"><i class="dot"></i>localhost</span>${modePill()}</div></header><div class="content">${page==='overview'?overview():page==='messages'?heading('Mensagens','Converse nos canais e diretamente com os nós da rede.')+statusStrip()+chat.render(state,busy):page==='nodes'?nodesPage():page==='channels'&&!selected?channelsPage():page==='drafts'?draftsPage():settingsPage()}<footer class="page-foot"><span>Mesh Studio <span class="muted">/</span> Feito para explorar sua rede.</span><span>${state.demo?'DADOS DE DEMONSTRAÇÃO':state.session_active?`Última leitura · ${esc(current.port)} · ${busy?'operação em andamento':'porta liberada'}`:'Conexão direta com o seu Meshtastic'}</span></footer></div></main></div>`;
   bind();
 }
 function overview(){
@@ -126,6 +127,7 @@ function openDraft(key){const target=key.startsWith('channel.')?'channels':key==
 function bindActions(root=document){root.querySelectorAll('[data-action]').forEach(el=>el.onclick=()=>actions[el.dataset.action]?.());}
 function bind(){
   bindActions();
+  if(page==='messages')chat.bind();else chat.pausePolling();
   document.querySelectorAll('[data-page]').forEach(el=>el.onclick=()=>go(el.dataset.page));
   document.querySelectorAll('[data-section]').forEach(el=>el.onclick=()=>{selected=el.dataset.section;fieldSearch='';jsonMode=false;render();});
   document.querySelectorAll('[data-open-draft]').forEach(el=>el.onclick=()=>openDraft(el.dataset.openDraft));
@@ -145,9 +147,9 @@ function bind(){
 const actions={
   menu:()=>$('.sidebar').classList.toggle('open'), overview:()=>go('overview'),
   ports:()=>task(async()=>{ports=await api('ports');}),
-  connect:()=>{const port=$('#port-select')?.value;if(!port)return notify('Nenhuma porta serial selecionada.',true);task(async()=>{state=await api('connect',{port});drafts={};errors={};},'Configurações lidas. A porta foi liberada automaticamente.');},
-  demo:()=>task(async()=>{state=await api('demo',{});drafts={};errors={};},'Demonstração iniciada. Nenhum acesso à porta serial.'),
-  disconnect:()=>task(async()=>{state=await api('disconnect',{});drafts={};errors={};},'Sessão encerrada e porta liberada.'),
+  connect:()=>{const port=$('#port-select')?.value;if(!port)return notify('Nenhuma porta serial selecionada.',true);task(async()=>{state=await api('connect',{port});drafts={};errors={};chat.reset();},'Configurações lidas. A porta foi liberada automaticamente.');},
+  demo:()=>task(async()=>{state=await api('demo',{});drafts={};errors={};chat.reset();},'Demonstração iniciada. Nenhum acesso à porta serial.'),
+  disconnect:()=>task(async()=>{state=await api('disconnect',{});drafts={};errors={};chat.reset();},'Sessão encerrada e porta liberada.'),
   refresh:()=>{if(dirtyKeys().length){return notify('Há rascunhos pendentes. Revise ou descarte antes de renovar toda a leitura.',true);}task(async()=>{state=await api('refresh',{});},'Leitura atualizada.');},
   'sync-state':()=>task(async()=>{state=await api('refresh',{});},'Leitura atualizada e porta liberada.'),
   'read-section':()=>{if(dirty(selected))return notify('Revise ou descarte o rascunho desta seção antes de reler.',true);task(async()=>{state=await api(`read/${selected}`,{});delete drafts[selected];delete errors[selected];},'Seção consultada.');},
@@ -174,5 +176,6 @@ function reviewDialog(){
   };
   if(!dialog.open)dialog.showModal();
 }
-window.addEventListener('beforeunload',event=>{if(dirtyKeys().length||applying){event.preventDefault();event.returnValue='';}});
+const chat=createChat({api,esc,icon,getState:()=>state,task,notify,refreshState:async()=>{state=await api('state');}});
+window.addEventListener('beforeunload',event=>{if(dirtyKeys().length||applying||chat.hasDrafts()){event.preventDefault();event.returnValue='';}});
 try{const session=await api('session');csrf=session.token;schema=session.schema;state=session.state;ports=await api('ports');render();}catch(e){$('#app').innerHTML=`<div class="boot"><h1>Não foi possível iniciar</h1><p style="margin-top:15px">${esc(e.message)}</p><p class="muted" style="margin-top:12px">Verifique se o servidor local está em execução e recarregue a página.</p></div>`;}

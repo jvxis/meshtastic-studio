@@ -6,9 +6,11 @@ import hashlib
 import threading
 import time
 from google.protobuf import json_format
+from pubsub import pub
 from meshtastic.serial_interface import SerialInterface
 from meshtastic.protobuf import admin_pb2, mesh_pb2, portnums_pb2
 from .schema import DEFINITIONS, OWNER_FIELDS, as_dict
+from .messages import MessageBox, BROADCAST
 
 READS = {"get_channel_request", "get_owner_request", "get_config_request",
          "get_module_config_request", "get_canned_message_module_messages_request",
@@ -24,9 +26,15 @@ def signature(command):
     return hashlib.sha256(clean.SerializeToString(deterministic=True)).hexdigest()
 
 
+def text_signature(destination, channel, payload):
+    return (destination, channel, bytes(payload))
+
+
 class GuardedSerial(SerialInterface):
     def __init__(self, *args, **kwargs):
         self.write_grants = {}
+        self.text_grants = {}
+        self.message_packets = 0
         self.write_packets = 0
         self.read_packets = 0
         super().__init__(*args, **kwargs)
@@ -35,6 +43,12 @@ class GuardedSerial(SerialInterface):
         kind = packet.WhichOneof("payload_variant")
         if kind in {"want_config_id", "heartbeat", "disconnect"}:
             return False
+        if kind == "packet" and packet.packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
+            p = packet.packet
+            key = text_signature(p.to, p.channel, p.decoded.payload)
+            if getattr(self, "text_grants", {}).get(key, 0) > time.monotonic():
+                return True
+            raise PermissionError("Mensagem sem autorização de envio.")
         if kind != "packet" or packet.packet.decoded.portnum != portnums_pb2.PortNum.ADMIN_APP:
             raise PermissionError("Pacote bloqueado: apenas consultas administrativas locais são permitidas.")
         local_num = self.myInfo.my_node_num if self.myInfo else None
@@ -50,12 +64,18 @@ class GuardedSerial(SerialInterface):
 
     def _sendToRadio(self, packet):
         self.inspect_packet(packet)  # Reject before a forbidden packet can enter the retry queue.
+        if packet.WhichOneof("payload_variant") == "packet" and packet.packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
+            # One serial submission, without the library's unbounded queue wait/replay.
+            return self._sendToRadioImpl(packet)
         return super()._sendToRadio(packet)
 
     def _sendToRadioImpl(self, packet):
         mutating = self.inspect_packet(packet)
         result = super()._sendToRadioImpl(packet)
-        if mutating:
+        if mutating and packet.packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
+            self.message_packets += 1
+            self.text_grants.pop(text_signature(packet.packet.to, packet.packet.channel, packet.packet.decoded.payload), None)
+        elif mutating:
             self.write_packets += 1
         else:
             self.read_packets += 1
@@ -116,6 +136,10 @@ class RealDevice:
     def __init__(self, port):
         self.port = port
         self.iface = GuardedSerial(devPath=port, timeout=40, connectNow=False)
+        self.message_lock = threading.RLock()
+        self.message_box = None
+        self.pending_messages = []
+        pub.subscribe(self.on_packet, "meshtastic.receive")
         try:
             self.iface.connect()
             self.iface.waitForConfig()
@@ -133,8 +157,51 @@ class RealDevice:
             if local.get("user"):
                 self.entries["owner"] = json_format.ParseDict(local["user"], mesh_pb2.User(), ignore_unknown_fields=True)
         except Exception:
-            self.iface.close()
+            self.close()
             raise
+
+    def on_packet(self, packet, interface):
+        if interface is not self.iface:
+            return
+        with self.message_lock:
+            if self.message_box is None:
+                self.pending_messages.append(packet)
+                self.pending_messages = self.pending_messages[-300:]
+            else:
+                self.message_box.receive(packet, self.node_id)
+
+    def attach_messages(self, box):
+        with self.message_lock:
+            self.message_box = box
+            for packet in self.pending_messages:
+                box.receive(packet, self.node_id)
+            self.pending_messages.clear()
+
+    def send_text(self, text, destination, channel, box, item_id):
+        target = int(destination[1:], 16) if destination else BROADCAST
+        done = threading.Event()
+
+        def response(packet):
+            routing = packet.get("decoded", {}).get("routing")
+            if routing is not None:
+                box.update(item_id, status="ack" if routing.get("errorReason", "NONE") == "NONE" else "rejected")
+                done.set()
+
+        key = text_signature(target, channel, text.encode("utf-8"))
+        self.iface.text_grants[key] = time.monotonic() + 35
+        packet = None
+        box.update(item_id, status="unconfirmed")
+        try:
+            packet = self.iface.sendData(text.encode("utf-8"), destinationId=target,
+                portNum=portnums_pb2.PortNum.TEXT_MESSAGE_APP, channelIndex=channel,
+                wantAck=True, onResponse=response, onResponseAckPermitted=True)
+            box.update(item_id, packet_id=packet.id)
+            done.wait(15)
+        finally:
+            self.iface.text_grants.pop(key, None)
+            if packet:
+                self.iface.responseHandlers.pop(packet.id, None)
+                self.iface.queue.pop(packet.id, None)
 
     def connected(self):
         return bool(self.iface.isConnected.is_set() and not self.iface._wantExit
@@ -227,7 +294,8 @@ class RealDevice:
                 "metadata": self.metadata,
                 "metrics": copy.deepcopy(local.get("deviceMetrics", {})),
                 "position": copy.deepcopy(local.get("position", {})),
-                "write_packets": self.iface.write_packets, "read_packets": self.iface.read_packets}
+                "write_packets": self.iface.write_packets, "read_packets": self.iface.read_packets,
+                "message_packets": self.iface.message_packets}
 
     def nodes(self):
         result = []
@@ -242,8 +310,12 @@ class RealDevice:
         return result
 
     def close(self):
-        self.iface.write_grants.clear()
-        self.iface.close()
+        try:
+            self.iface.write_grants.clear()
+            self.iface.text_grants.clear()
+            self.iface.close()
+        finally:
+            pub.unsubscribe(self.on_packet, "meshtastic.receive")
 
 
 class DeviceSession:
@@ -258,6 +330,8 @@ class DeviceSession:
         self._summary = {}
         self._nodes = []
         self.read_packets = self.write_packets = 0
+        self.message_packets = 0
+        self.messages = MessageBox()
         self.observed_at = None
         with self.operation():
             pass
@@ -277,6 +351,8 @@ class DeviceSession:
             self.transport = dev
             # Keep optional sections that are not part of the initial handshake.
             dev.entries = {**self.entries, **dev.entries}
+            if hasattr(dev, "attach_messages"):
+                dev.attach_messages(self.messages)
             yield dev
         finally:
             try:
@@ -286,6 +362,7 @@ class DeviceSession:
                     self._nodes = dev.nodes()
                     self.read_packets += self._summary["read_packets"]
                     self.write_packets += self._summary["write_packets"]
+                    self.message_packets += self._summary.get("message_packets", 0)
                     self.observed_at = datetime.now(timezone.utc).isoformat()
             finally:
                 try:
@@ -295,7 +372,7 @@ class DeviceSession:
 
     def summary(self):
         return {**copy.deepcopy(self._summary), "read_packets": self.read_packets,
-                "write_packets": self.write_packets}
+                "write_packets": self.write_packets, "message_packets": self.message_packets}
 
     def nodes(self):
         return copy.deepcopy(self._nodes)

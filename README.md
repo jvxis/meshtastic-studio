@@ -1,8 +1,8 @@
 # Mesh Studio
 
-Web app local, em português, para consultar e editar configurações de um Meshtastic conectado por USB/serial. A interface tem painel do dispositivo, nós conhecidos, formulários gerados pelo protocolo, editor JSON e revisão de rascunhos.
+Web app local, em português, para consultar e editar configurações de um Meshtastic conectado por USB/serial. A interface tem painel do dispositivo, nós conhecidos, formulários gerados pelo protocolo, editor JSON, revisão de rascunhos e mensagens de canais e diretas.
 
-**A inicialização padrão bloqueia gravações reais no servidor e na camada serial.** É possível editar e revisar rascunhos sem enviá-los ao rádio. O simulador permite testar uma aplicação completa sem conectar hardware.
+**A inicialização padrão bloqueia gravações de configuração e envio de mensagens reais no servidor e na camada serial.** É possível editar e revisar rascunhos sem enviá-los ao rádio. O simulador permite testar uma aplicação completa sem conectar hardware.
 
 ![Painel do Mesh Studio com dados fictícios de demonstração](docs/images/demo-desktop.png)
 
@@ -142,7 +142,7 @@ O catálogo desta versão possui **36 seções e 254 campos principais** no prot
 
 O catálogo é gerado dos descritores Protocol Buffers da biblioteca instalada. **Existir no protocolo não significa ser implementado pelo firmware conectado.** Seções não recebidas permanecem indisponíveis até uma consulta bem-sucedida. Os limites de tipos, enumerações, tamanhos de strings/bytes e quantidades conhecidos pelos descritores nanopb são validados; regras adicionais dependem do firmware.
 
-Configurações acessíveis apenas pelo aplicativo de tela, recursos proprietários e comandos sem uma consulta correspondente não têm cobertura garantida. Esta versão não fornece atualização de firmware, factory reset, reinicialização, desligamento, envio de mensagens, modificação de nós remotos ou localização fixa enviada como pacote separado. Ela edita as configurações retornadas pela API local. A configuração de GPS/posição está incluída, mas isso não equivale a todas as ações administrativas de posição.
+Configurações acessíveis apenas pelo aplicativo de tela, recursos proprietários e comandos sem uma consulta correspondente não têm cobertura garantida. Esta versão não fornece atualização de firmware, factory reset, reinicialização, desligamento, modificação de nós remotos ou localização fixa enviada como pacote separado. Ela edita as configurações retornadas pela API local. A configuração de GPS/posição está incluída, mas isso não equivale a todas as ações administrativas de posição.
 
 ## Rascunhos e aplicação
 
@@ -161,9 +161,32 @@ A interface não pode habilitar a gravação do processo em execução. O servid
 
 Cada aplicação modifica **uma seção**. Não há transação atômica entre várias seções nem rollback automático. Uma mudança pode reiniciar o dispositivo ou interromper a conexão. Se a verificação falhar, a interface informa resultado não confirmado e exige nova leitura; não repete a gravação automaticamente.
 
+## Mensagens de canais e mensagens diretas
+
+1. Leia seu rádio na visão geral e abra **Mensagens** no menu lateral.
+2. Em **Conversa**, escolha um canal habilitado ou uma conversa direta com um nó conhecido. Para uma mensagem direta, selecione também o canal de envio compartilhado com o destinatário.
+3. Escreva até **233 bytes UTF-8**; letras acentuadas e emojis podem ocupar mais de um byte. Clique em **Revisar mensagem**, confira o texto, o destino e o canal e confirme **Enviar mensagem**.
+4. O envio real exige iniciar com `./start.ps1 -AllowWrites`. Em modo somente leitura, a recepção permanece disponível, mas mensagens não são transmitidas. No simulador, os envios são fictícios.
+5. Para receber, clique em **Receber por 30 segundos**. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Parar recepção** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
+
+O app abre a serial apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Fechar a aba não mantém uma recepção indefinida: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
+
+O histórico reúne até **300 mensagens**, apenas na memória da sessão do servidor. Inclui pacotes de texto recebidos durante operações do app, separados por canal ou pelo outro nó da conversa direta, com indicação MQTT quando presente. Não importa o histórico completo salvo pela MUI; mensagens recebidas pelo rádio enquanto o app está desconectado podem não chegar a este histórico. Recarregar a página conserva o histórico do servidor; encerrar a sessão ou reiniciar o servidor o apaga. Rascunhos de mensagens ficam na memória da página. Nenhum histórico é salvo em disco ou publicado no repositório.
+
+O envio abre uma conexão breve, confere novamente o rádio, o canal e a configuração LoRa, envia um pacote de texto e aguarda confirmação de rede por até 15 segundos. A revisão é de uso único, válida por cinco minutos. Alterar o canal ou o rádio depois da revisão bloqueia o envio. O app não repete uma mensagem automaticamente; retransmissões do próprio protocolo no rádio ainda podem ocorrer.
+
+- **ACK de rede:** houve uma confirmação de rede; não significa que a pessoa leu a mensagem nem confirma entrega a todos os membros de um canal.
+- **Sem confirmação de rede:** nenhuma confirmação foi observada dentro da janela. A mensagem ainda pode ter chegado; uma confirmação tardia pode atualizar o histórico em uma recepção posterior.
+- **Rede recusou o envio:** foi recebida uma resposta de erro do protocolo.
+- **Resultado desconhecido:** houve uma falha durante o envio. Confira antes de reenviar para evitar duplicatas.
+
+A criptografia das mensagens diretas depende do firmware e das chaves disponíveis; selecionar um destinatário não é uma garantia adicional de criptografia ponta a ponta. O módulo não altera GPS, MQTT, Wi-Fi, canais ou outras configurações para transmitir. Textos nunca são interpretados como comandos administrativos. A proteção serial permite apenas o texto e o destino revisados, uma vez, e mantém bloqueados reset, reboot, telemetria enviada e comandos administrativos remotos.
+
+No simulador, **Simular recebimento** adiciona uma mensagem de canal e uma direta, permitindo testar o fluxo inteiro sem hardware.
+
 ## T-Deck: tela, GPS e conectividade
 
-A [Meshtastic UI compartilha a Client API com os clientes externos](https://meshtastic.org/docs/configuration/device-uis/meshtasticui/#accessing-the-client-api). Uma conexão serial mantida aberta pode impedir que a Home atualize indicadores como Wi-Fi e MQTT. Por isso o Mesh Studio libera a porta ao terminar cada operação, sem depender de fechar a aba ou de um temporizador de inatividade. Durante uma consulta ou aplicação a tela ainda pode pausar por alguns instantes; uma nova conexão pode levar cerca de 40 segundos. Não há atualização contínua em segundo plano. O app mostra o horário da última consulta ao rádio; cada seção mantém sua última leitura, e a telemetria pode ser mais antiga.
+A [Meshtastic UI compartilha a Client API com os clientes externos](https://meshtastic.org/docs/configuration/device-uis/meshtasticui/#accessing-the-client-api). Uma conexão serial mantida aberta pode impedir que a Home atualize indicadores como Wi-Fi e MQTT. Por isso o Mesh Studio libera a porta ao terminar cada operação, sem depender de fechar a aba ou de um temporizador de inatividade. Durante uma consulta ou aplicação a tela ainda pode pausar por alguns instantes; uma nova conexão pode levar cerca de 40 segundos. Não há consulta automática contínua ao rádio. Na página Mensagens, o navegador atualiza somente o histórico em memória; receber novos pacotes exige uma janela de recepção explícita. O app mostra o horário da última consulta ao rádio; cada seção mantém sua última leitura, e a telemetria pode ser mais antiga.
 
 - **GPS:** use `gps_mode`. O antigo `gps_enabled` é obsoleto e seu valor não indica o estado atual do GPS. GPS habilitado não garante coordenadas: é necessário obter uma posição dos satélites.
 - **Campos obsoletos:** o formulário os apresenta somente em “Campos obsoletos · somente leitura”. Alterações pelo JSON/API são rejeitadas; omitir esses campos preserva o valor existente, inclusive em estruturas internas. A indicação vem do protocolo instalado, não de uma detecção completa das capacidades de cada firmware.
@@ -182,7 +205,7 @@ A [Meshtastic UI compartilha a Client API com os clientes externos](https://mesh
 
 ## Desenvolvimento e testes
 
-Backend: Python/FastAPI e Meshtastic. Frontend: HTML, CSS e JavaScript sem etapa de compilação. A interface chama apenas a API local.
+Backend: Python/FastAPI e Meshtastic (incluindo o mecanismo de eventos pubsub da biblioteca). Frontend: HTML, CSS e JavaScript sem etapa de compilação. A interface chama apenas a API local.
 
 Para desenvolver usando uma cópia local da biblioteca Meshtastic, instale-a explicitamente na `.venv` depois das dependências, por exemplo: `.\.venv\Scripts\python.exe -m pip install ../python`. Esse passo é opcional e não faz parte da instalação normal do app.
 

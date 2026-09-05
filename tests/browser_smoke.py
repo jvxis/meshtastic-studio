@@ -123,6 +123,35 @@ def run():
             page.locator('[data-section="canned_text"]').click()
             expect(page.locator('[data-field="text"]')).to_contain_text("Olá!")
 
+            page.locator('nav [data-page="messages"]').click()
+            page.locator('#chat-receive').click()
+            expect(page.locator('#chat-feed')).to_contain_text('Mensagem de canal simulada')
+            page.locator('#chat-text').fill('Olá canal! <script>window.chatInjected=true</script>')
+            page.locator('#chat-review').click()
+            expect(page.locator('#chat-send')).to_be_visible()
+            expect(page.locator('.chat-review-text')).to_contain_text('<script>')
+            page.locator('#chat-send').click()
+            expect(page.locator('#review-dialog')).not_to_be_visible()
+            expect(page.locator('#chat-feed')).to_contain_text('Envio simulado')
+            assert not page.evaluate('Boolean(window.chatInjected)')
+            expect(page.locator('#chat-text')).to_have_value('')
+            page.locator('#chat-target').select_option('direct:!de000003')
+            expect(page.locator('#chat-feed')).to_contain_text('Mensagem direta de demonstração')
+            page.locator('#chat-channel').select_option('1')
+            page.locator('#chat-text').fill('Olá, mensagem direta!')
+            page.locator('#chat-review').click()
+            expect(page.locator('.dialog-body')).to_contain_text('canal 1')
+            page.locator('#chat-send').click()
+            expect(page.locator('#review-dialog')).not_to_be_visible()
+            expect(page.locator('#chat-feed')).to_contain_text('Olá, mensagem direta!')
+            expect(page.locator('#chat-channel')).to_have_value('1')
+            page.screenshot(path=str(ARTIFACTS / 'demo-messages.png'), full_page=True, animations='disabled')
+            page.set_viewport_size({'width': 390, 'height': 844})
+            assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+            page.screenshot(path=str(ARTIFACTS / 'demo-messages-mobile.png'), full_page=True, animations='disabled')
+            assert page.evaluate("Array.from(document.querySelectorAll('.chat-panel,.chat-panel h2,.chat-panel p,.chat-feed')).every(e=>e.scrollWidth<=e.clientWidth+1)")
+            page.set_viewport_size({'width': 1440, 'height': 1050})
+
             page.locator('nav [data-page="overview"]').click()
             page.set_viewport_size({"width": 390, "height": 844})
             page.screenshot(path=str(ARTIFACTS / "demo-mobile.png"), full_page=True, animations="disabled")
@@ -138,7 +167,10 @@ def run():
         assert state["demo"] and not state["server_writes_enabled"]
         assert state["device"]["write_packets"] == 0
         assert state["device"]["simulated_writes"] == 1
-        print(json.dumps({"passed": True, "checks": ["desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings"], "browser_errors": errors, "serial_writes": 0}, indent=2))
+        messages = httpx.get(url + '/api/messages').json()['messages']
+        assert len(messages) == 4
+        assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 1
+        print(json.dumps({"passed": True, "checks": ["desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
         proc.terminate()
         proc.wait(timeout=10)

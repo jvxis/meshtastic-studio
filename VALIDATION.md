@@ -1,5 +1,13 @@
 # Validação inicial — 5 de setembro de 2026
 
+## Atualização: mensagens de canais e diretas
+
+- **54 testes de backend aprovados**, incluindo envio de canal e direto no simulador, revisão de uso único, mudança de canal após revisão, modo somente leitura, limite UTF-8, destino inválido, falha de envio sem repetição, confirmação tardia, deduplicação, isolamento de mensagens diretas para outros nós e janela de recepção limitada/cancelável.
+- Testes de navegador aprovados em desktop e celular: recebimento simulado em canal e conversa direta, composição, revisão, envio simulado, escolha de canal para mensagens diretas e texto contendo HTML exibido sem executar código.
+- Leitura e uma janela completa de recepção foram executadas no T-Deck real. A operação de recepção levou **52,3 segundos**, incluindo handshake e 30 segundos de escuta. Terminou com a porta liberada, **zero pacotes de texto enviados e zero gravações de configuração**.
+- Nenhuma mensagem chegou nessa janela física. A recepção efetiva de textos e os envios com ACK foram verificados com dados e transporte simulados; a entrega entre rádios reais permanece sem teste nesta validação.
+- Não há importação do histórico completo da MUI nem garantia de capturar mensagens enquanto a porta está livre. O histórico fica em memória e é apagado ao encerrar a sessão ou reiniciar o servidor.
+
 ## Atualização: conexões breves e campos obsoletos
 
 - **35 testes de backend aprovados**, incluindo liberação da porta após leitura, atualização, aplicação simulada e erros; rejeição de outro rádio na mesma porta; alterações concorrentes pela tela; proteção de campos obsoletos e preservação quando omitidos do JSON.

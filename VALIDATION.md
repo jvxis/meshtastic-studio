@@ -1,5 +1,12 @@
 # Validação inicial — 5 de setembro de 2026
 
+## Atualização: diagnóstico por tipo de conexão
+
+- **111 testes de backend aprovados**, incluindo oito novos casos de falha na conexão inicial e em consultas posteriores. Erros USB/Serial não mencionam TCP; recusas e falhas TCP mantêm as orientações de rede. Exceções internas não são expostas nas respostas nem nos eventos.
+- A falha Windows `Cannot configure port` recebe uma orientação específica de inicialização USB, separada de acesso negado/porta ocupada. A escuta ativa utiliza o mesmo diagnóstico por transporte.
+- Antes desta correção, a escuta ativa foi validada no T-Deck físico por **40 segundos**, após leitura inicial de 30 seções. A interface web permaneceu utilizável, com envio/revisão e parada disponíveis. Nenhuma mensagem chegou nessa janela; foram enviados **zero pacotes de texto e zero gravações de configuração**. A parada liberou a conexão.
+- Em uma tentativa posterior, o Windows voltou a enumerar a porta, mas falhou ao inicializá-la, com erro de dispositivo 31. Reiniciar somente a interface USB pelo Windows não resolveu essa tentativa. A mensagem genérica anterior mencionava TCP mesmo nesse erro serial; essa ambiguidade foi corrigida.
+
 ## Atualização: escuta ativa no desktop
 
 - **103 testes de backend aprovados**, com 16 novos casos em transportes USB e TCP simulados: recepção contínua, envio de canal e direto na mesma conexão, recepção durante a espera de confirmação, leitura e aplicação de configurações durante escuta, bloqueio no modo somente leitura, conferência do canal antes de enviar, troca de rádio, parada durante handshake/envio, liberação ao desconectar e queda sem reconexão automática.

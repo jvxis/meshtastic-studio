@@ -23,6 +23,7 @@ from .schema import DEFINITIONS, OWNER_FIELDS, as_dict, public_schema, redact, p
 from .device import DeviceSession, write_command
 from .demo import DemoDevice
 from .messaging import Messaging, MessageDraft, MessageSend
+from .errors import communication_error
 from meshtastic.protobuf import mesh_pb2
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -297,8 +298,12 @@ def create_app(manager=None):
 
     @app.exception_handler(Exception)
     async def device_error(request, exc):
-        manager.log("Consulta interrompida", "Verifique a conexão, o endereço ou porta e o suporte do firmware.", "warning")
-        return JSONResponse({"detail": "Não foi possível concluir a comunicação. Para TCP, confira o IP, a porta e o Wi-Fi do rádio; para USB, confira se a serial está livre. Alguns firmwares desativam o TCP no modo MUI. Outro cliente também pode ocupar a API, ou a consulta pode não ser suportada."}, status_code=503)
+        transport = getattr(request.state, 'connection_transport', None)
+        if transport is None and manager.device and not manager.device.demo:
+            transport = 'tcp' if getattr(manager.device, 'host', None) else 'serial'
+        detail = communication_error(exc, transport)
+        manager.log("Consulta interrompida", detail, "warning")
+        return JSONResponse({"detail": detail}, status_code=503)
 
     # Expected serial failures are handled normally, without an ASGI traceback.
     for error_type in (TimeoutError, RuntimeError, PermissionError, OSError):
@@ -317,7 +322,8 @@ def create_app(manager=None):
         return manager.state()
 
     @app.post("/api/connect")
-    def connect(body: ConnectBody):
+    def connect(body: ConnectBody, request: Request):
+        request.state.connection_transport = body.transport
         return manager.connect(body.port, host=body.host, tcp_port=body.tcp_port)
 
     @app.post("/api/demo")

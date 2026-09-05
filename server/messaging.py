@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from .messages import MAX_TEXT_BYTES
 from .device import DeviceSession
+from .errors import communication_error
 
 
 class MessageDraft(BaseModel):
@@ -154,6 +155,8 @@ class Messaging:
         context = None
         entered = False
         failure = False
+        error_detail = ''
+        selected = None
         try:
             with self.lock:
                 if self.active_stop.is_set():
@@ -173,18 +176,20 @@ class Messaging:
                 with self.lock:
                     if not dev.connected():
                         raise ConnectionError('Reception transport closed')
-        except Exception:
+        except Exception as error:
             failure = not self.active_stop.is_set()
+            error_detail = communication_error(error, 'tcp' if getattr(selected, 'host', None) else 'serial')
         finally:
             with self.lock:
                 self.active_transport = None
                 try:
                     if entered:
                         context.__exit__(None, None, None)
-                except Exception:
+                except Exception as error:
                     failure = True
+                    error_detail = communication_error(error, 'tcp' if getattr(selected, 'host', None) else 'serial')
                 self.active_phase = 'error' if failure else 'off'
-                self.active_error = ('A escuta foi interrompida. Confira a conexão e o suporte do firmware (TCP pode estar desativado na MUI) e inicie novamente. Não houve reconexão automática.' if failure else '')
+                self.active_error = (f'A escuta foi interrompida. {error_detail} Inicie novamente quando a conexão estiver disponível; não houve reconexão automática.' if failure else '')
                 self.active_thread = None
                 self.log('Escuta interrompida' if failure else 'Escuta encerrada',
                          self.active_error or 'Conexão liberada; histórico preservado.', 'warning' if failure else 'info')

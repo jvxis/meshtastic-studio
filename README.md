@@ -139,6 +139,7 @@ Na instalação manual, depois de `git pull --ff-only`, execute novamente o coma
 | Navegador mostra conexão recusada | Confira se o terminal do servidor continua aberto e se você está acessando o endereço na mesma máquina. |
 | Porta 8765 ocupada | Encerre a outra instância ou execute `./start.ps1 -Port 8766` e abra `http://127.0.0.1:8766`. |
 | Nenhuma porta serial encontrada | Confira o cabo de dados, a conexão USB e se o sistema operacional reconhece o dispositivo. Depois use **Buscar portas**. |
+| Windows reconhece a COM, mas não consegue inicializar USB/Serial | Reconecte o cabo de dados; se persistir, desligue e ligue o rádio com o cabo conectado. O app diferencia essa falha de porta ocupada e de falhas TCP. |
 | Porta serial ocupada | Desconecte outros clientes ou monitores seriais que estejam usando o equipamento. |
 | TCP recusado ou sem resposta | Confira IP, porta 4403, acesso pela rede e suporte do firmware; na MUI do T-Deck examinada, o servidor TCP fica desativado. |
 | Consulta sem resposta | Verifique a conexão e o suporte do firmware. O app repete uma consulta de leitura no máximo uma vez. |

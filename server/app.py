@@ -4,7 +4,9 @@ import copy
 from datetime import datetime, timezone
 import hashlib
 import json
+import ipaddress
 import os
+import re
 from pathlib import Path
 import secrets
 import threading
@@ -14,7 +16,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from pydantic import BaseModel, Field
+from typing import Literal
+from pydantic import BaseModel, Field, model_validator
 from serial.tools import list_ports
 from .schema import DEFINITIONS, OWNER_FIELDS, as_dict, public_schema, redact, prepare, diff
 from .device import DeviceSession, write_command
@@ -26,7 +29,32 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class ConnectBody(BaseModel):
-    port: str = Field(min_length=1, max_length=80)
+    transport: Literal["serial", "tcp"] = "serial"
+    port: str | None = Field(default=None, min_length=1, max_length=80)
+    host: str | None = Field(default=None, min_length=1, max_length=253)
+    tcp_port: int = Field(default=4403, ge=1, le=65535, strict=True)
+
+    @model_validator(mode="after")
+    def validate_endpoint(self):
+        if self.transport == "serial":
+            if not self.port or self.host is not None or self.tcp_port != 4403:
+                raise ValueError("Selecione uma porta serial.")
+        else:
+            if self.port is not None or not self.host:
+                raise ValueError("Informe o IP ou nome do rádio.")
+            self.host = self.host.strip()
+            try:
+                address = ipaddress.ip_address(self.host)
+            except ValueError:
+                labels = self.host.rstrip(".").split(".")
+                if not all(re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label) for label in labels):
+                    raise ValueError("Informe somente IP ou nome, sem URL ou porta.") from None
+                if re.fullmatch(r"[0-9.]+", self.host):
+                    raise ValueError("Endereço IP inválido.") from None
+            else:
+                if address.is_unspecified or address.is_multicast:
+                    raise ValueError("Informe o endereço de um dispositivo.")
+        return self
 
 
 class PreviewBody(BaseModel):
@@ -96,21 +124,21 @@ class Manager(Messaging):
         with self.lock:
             if self.device:
                 self.device.close()
-                self.log("Desconexão", "Porta liberada.")
+                self.log("Desconexão", "Conexão com o rádio encerrada.")
             self.device = None
             self.previews.clear()
             self.message_previews.clear()
             self.epoch = secrets.token_hex(16)
 
-    def connect(self, port=None, demo=False):
+    def connect(self, port=None, demo=False, *, host=None, tcp_port=4403):
         with self.lock:
             if self.device:
                 raise HTTPException(409, "Desconecte a sessão atual antes de abrir outra.")
-            if not demo and port not in {p.device for p in list_ports.comports()}:
+            if not demo and not host and port not in {p.device for p in list_ports.comports()}:
                 raise HTTPException(400, "Escolha uma porta serial presente nesta máquina.")
-            self.device = DemoDevice() if demo else DeviceSession(port)
+            self.device = DemoDevice() if demo else (DeviceSession(host=host, tcp_port=tcp_port) if host else DeviceSession(port))
             self.epoch = secrets.token_hex(16)
-            self.log("Demonstração" if demo else "Leitura concluída", "Dispositivo simulado, sem acesso à serial." if demo else f"Leitura de {port} concluída; porta liberada automaticamente. Nenhuma configuração enviada.")
+            self.log("Demonstração" if demo else "Leitura concluída", "Dispositivo simulado, sem acesso ao rádio." if demo else f"Leitura de {self.device.port} concluída; conexão encerrada automaticamente. Nenhuma configuração enviada.")
             return self.state()
 
     def read(self, key):
@@ -143,6 +171,8 @@ class Manager(Messaging):
             if len(command.SerializeToString()) > mesh_pb2.Constants.DATA_PAYLOAD_LEN:
                 raise HTTPException(400, "Esta configuração excede o tamanho de um pacote administrativo.")
             warnings = []
+            if body.section == "config.network" and getattr(dev, "host", None):
+                warnings.append("Você está conectado por TCP. Alterar Wi-Fi, IP ou Ethernet pode impedir a releitura. Se isso ocorrer, confira o novo endereço ou use USB; não repita a gravação sem verificar.")
             if body.section in {"config.lora", "config.network", "config.bluetooth", "config.security", "config.device"} or body.section.startswith("channel."):
                 warnings.append("A mudança pode reiniciar o rádio ou interromper a conexão. A gravação será conferida por uma nova leitura.")
             if any(c["path"] == "is_licensed" for c in changes):
@@ -250,8 +280,8 @@ def create_app(manager=None):
 
     @app.exception_handler(Exception)
     async def device_error(request, exc):
-        manager.log("Consulta interrompida", "Verifique a conexão, a disponibilidade da porta e o suporte do firmware.", "warning")
-        return JSONResponse({"detail": "Não foi possível concluir a comunicação. Verifique se a porta está livre e o dispositivo conectado. A consulta também pode não ser suportada por este firmware."}, status_code=503)
+        manager.log("Consulta interrompida", "Verifique a conexão, o endereço ou porta e o suporte do firmware.", "warning")
+        return JSONResponse({"detail": "Não foi possível concluir a comunicação. Para TCP, confira o IP, a porta e o Wi-Fi do rádio; para USB, confira se a serial está livre. Alguns firmwares desativam o TCP no modo MUI. Outro cliente também pode ocupar a API, ou a consulta pode não ser suportada."}, status_code=503)
 
     # Expected serial failures are handled normally, without an ASGI traceback.
     for error_type in (TimeoutError, RuntimeError, PermissionError, OSError):
@@ -271,7 +301,7 @@ def create_app(manager=None):
 
     @app.post("/api/connect")
     def connect(body: ConnectBody):
-        return manager.connect(body.port)
+        return manager.connect(body.port, host=body.host, tcp_port=body.tcp_port)
 
     @app.post("/api/demo")
     def demo():

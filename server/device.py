@@ -3,11 +3,13 @@ import copy
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
+import socket
 import threading
 import time
 from google.protobuf import json_format
 from pubsub import pub
 from meshtastic.serial_interface import SerialInterface
+from meshtastic.tcp_interface import TCPInterface
 from meshtastic.protobuf import admin_pb2, mesh_pb2, portnums_pb2
 from .schema import DEFINITIONS, OWNER_FIELDS, as_dict
 from .messages import MessageBox, BROADCAST
@@ -30,7 +32,7 @@ def text_signature(destination, channel, payload):
     return (destination, channel, bytes(payload))
 
 
-class GuardedSerial(SerialInterface):
+class GuardedTransport:
     def __init__(self, *args, **kwargs):
         self.write_grants = {}
         self.text_grants = {}
@@ -60,14 +62,13 @@ class GuardedSerial(SerialInterface):
             return False
         if action in WRITES and self.write_grants.get(signature(command), 0) > time.monotonic():
             return True
-        raise PermissionError("Gravação bloqueada pela proteção da porta serial.")
+        raise PermissionError("Gravação bloqueada pela proteção da conexão.")
 
     def _sendToRadio(self, packet):
         self.inspect_packet(packet)  # Reject before a forbidden packet can enter the retry queue.
-        if packet.WhichOneof("payload_variant") == "packet" and packet.packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
-            # One serial submission, without the library's unbounded queue wait/replay.
-            return self._sendToRadioImpl(packet)
-        return super()._sendToRadio(packet)
+        # One submission, without the library's unbounded queue wait/replay.
+        # Explicit read() controls the only retries allowed by this adapter.
+        return self._sendToRadioImpl(packet)
 
     def _sendToRadioImpl(self, packet):
         mutating = self.inspect_packet(packet)
@@ -77,9 +78,55 @@ class GuardedSerial(SerialInterface):
             self.text_grants.pop(text_signature(packet.packet.to, packet.packet.channel, packet.packet.decoded.payload), None)
         elif mutating:
             self.write_packets += 1
+            self.write_grants.pop(signature(admin_pb2.AdminMessage.FromString(packet.packet.decoded.payload)), None)
         else:
             self.read_packets += 1
         return result
+
+
+class GuardedSerial(GuardedTransport, SerialInterface):
+    pass
+
+
+class GuardedTCP(GuardedTransport, TCPInterface):
+    """Bounded socket I/O; a lost connection is never automatically reopened."""
+
+    def myConnect(self):
+        self.socket = socket.create_connection((self.hostname, self.portNumber), timeout=5)
+        self.socket.settimeout(5)
+
+    def _writeBytes(self, data):
+        if self.socket is None or self._wantExit:
+            raise ConnectionError("A conexão TCP foi encerrada.")
+        self.socket.sendall(data)
+
+    def _readBytes(self, length):
+        if self.socket is None:
+            self._wantExit = True
+            return None
+        try:
+            data = self.socket.recv(length)
+        except socket.timeout:
+            return b""
+        if not data:
+            self._wantExit = True
+            self.isConnected.clear()
+        return data
+
+    def _reconnect(self):
+        raise ConnectionError("A conexão TCP caiu. Faça uma nova leitura do dispositivo.")
+
+    def _sendDisconnect(self):
+        if self.socket is not None and not self._wantExit:
+            super()._sendDisconnect()
+
+    def close(self):
+        try:
+            self._sendDisconnect()
+        except OSError:
+            pass
+        finally:
+            super().close()
 
 
 def read_request(key):
@@ -133,9 +180,11 @@ def write_command(key, value):
 class RealDevice:
     demo = False
 
-    def __init__(self, port):
-        self.port = port
-        self.iface = GuardedSerial(devPath=port, timeout=40, connectNow=False)
+    def __init__(self, port=None, *, host=None, tcp_port=4403):
+        self.host, self.tcp_port = host, tcp_port
+        self.port = (f"[{host}]:{tcp_port}" if ":" in host else f"{host}:{tcp_port}") if host else port
+        self.iface = (GuardedTCP(hostname=host, portNumber=tcp_port, timeout=40, connectNow=False)
+                      if host else GuardedSerial(devPath=port, timeout=40, connectNow=False))
         self.message_lock = threading.RLock()
         self.message_box = None
         self.pending_messages = []
@@ -291,6 +340,8 @@ class RealDevice:
         owner = as_dict(self.entries["owner"]) if "owner" in self.entries else {}
         return {"id": self.node_id, "name": owner.get("long_name", self.node_id),
                 "short_name": owner.get("short_name", ""), "port": self.port,
+                "transport": "tcp" if self.host else "serial", "host": self.host,
+                "tcp_port": self.tcp_port if self.host else None,
                 "metadata": self.metadata,
                 "metrics": copy.deepcopy(local.get("deviceMetrics", {})),
                 "position": copy.deepcopy(local.get("position", {})),
@@ -319,11 +370,12 @@ class RealDevice:
 
 
 class DeviceSession:
-    """Keep a snapshot, borrowing the serial transport only during explicit I/O."""
+    """Keep a snapshot, borrowing the transport only during explicit I/O."""
     demo = False
 
-    def __init__(self, port):
+    def __init__(self, port=None, *, host=None, tcp_port=4403):
         self.port = port
+        self.host, self.tcp_port = host, tcp_port
         self.node_id = None
         self.entries = {}
         self.transport = None
@@ -341,11 +393,11 @@ class DeviceSession:
 
     @contextmanager
     def operation(self):
-        dev = RealDevice(self.port)
+        dev = RealDevice(host=self.host, tcp_port=self.tcp_port) if self.host else RealDevice(self.port)
         accepted = False
         try:
             if self.node_id and dev.node_id != self.node_id:
-                raise ValueError("Outro rádio está nesta porta. Encerre a sessão e leia o dispositivo novamente.")
+                raise ValueError("Outro rádio está neste endereço ou porta. Encerre a sessão e leia o dispositivo novamente.")
             accepted = True
             self.node_id = dev.node_id
             self.transport = dev
@@ -359,6 +411,7 @@ class DeviceSession:
                 if accepted:
                     self.entries = dev.entries
                     self._summary = dev.summary()
+                    self.port = self._summary["port"]
                     self._nodes = dev.nodes()
                     self.read_packets += self._summary["read_packets"]
                     self.write_packets += self._summary["write_packets"]

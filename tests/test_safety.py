@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from meshtastic.protobuf import mesh_pb2, admin_pb2, portnums_pb2
 from server.app import Manager, create_app
-from server.device import GuardedSerial, RealDevice, signature, read_request, write_command
+from server.device import GuardedSerial, GuardedTCP, RealDevice, signature, read_request, write_command
 from server.schema import MASK, DEFINITIONS, prepare, as_dict
 
 
@@ -175,8 +175,8 @@ def test_csrf_origin_and_host_protection(client):
     assert manager.device.connected()
 
 
-def make_guard():
-    guard = object.__new__(GuardedSerial)
+def make_guard(guard_type=GuardedSerial):
+    guard = object.__new__(guard_type)
     guard.myInfo = mesh_pb2.MyNodeInfo(my_node_num=123)
     guard.write_grants = {}
     return guard
@@ -190,8 +190,9 @@ def packet(command, dest=123):
     return value
 
 
-def test_transport_guard_rejects_mutations_and_remote_commands():
-    guard = make_guard()
+@pytest.mark.parametrize("guard_type", [GuardedSerial, GuardedTCP])
+def test_transport_guard_rejects_mutations_and_remote_commands(guard_type):
+    guard = make_guard(guard_type)
     assert guard.inspect_packet(mesh_pb2.ToRadio(want_config_id=123)) is False
     assert guard.inspect_packet(packet(admin_pb2.AdminMessage(get_owner_request=True))) is False
     for cmd in [admin_pb2.AdminMessage(reboot_seconds=1), admin_pb2.AdminMessage(factory_reset_device=1),
@@ -206,8 +207,9 @@ def test_transport_guard_rejects_mutations_and_remote_commands():
         guard.inspect_packet(forbidden)
 
 
-def test_transport_grant_is_exact_and_expires():
-    guard = make_guard()
+@pytest.mark.parametrize("guard_type", [GuardedSerial, GuardedTCP])
+def test_transport_grant_is_exact_and_expires(guard_type):
+    guard = make_guard(guard_type)
     approved = admin_pb2.AdminMessage(set_ringtone_message="approved")
     guard.write_grants[signature(approved)] = time.monotonic() + 10
     assert guard.inspect_packet(packet(approved)) is True

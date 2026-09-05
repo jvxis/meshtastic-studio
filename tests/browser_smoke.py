@@ -40,6 +40,34 @@ def run():
             page.on("pageerror", lambda exc: errors.append(str(exc)))
             page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
             page.goto(url)
+            expect(page.locator('#port-select')).to_be_visible()
+            page.locator('#connection-type').select_option('tcp')
+            expect(page.locator('#tcp-host')).to_be_visible()
+            expect(page.locator('#tcp-port')).to_have_value('4403')
+            expect(page.locator('#port-select')).to_have_count(0)
+            page.locator('#tcp-host').fill('192.0.2.10')
+            page.locator('#tcp-port').fill('4404')
+            page.locator('#connection-type').select_option('serial')
+            expect(page.locator('#tcp-host')).to_have_count(0)
+            page.locator('#connection-type').select_option('tcp')
+            expect(page.locator('#tcp-host')).to_have_value('192.0.2.10')
+            expect(page.locator('#tcp-port')).to_have_value('4404')
+            page.set_viewport_size({'width': 390, 'height': 844})
+            assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+            expect(page.locator('.sidebar')).not_to_be_in_viewport()
+            page.screenshot(path=str(ARTIFACTS / 'tcp-connect-mobile.png'), full_page=True)
+            page.set_viewport_size({'width': 1440, 'height': 1050})
+            page.screenshot(path=str(ARTIFACTS / 'tcp-connect-desktop.png'), full_page=True)
+            submitted = []
+            empty_state = httpx.get(url + '/api/state').json()
+            def capture_connect(route):
+                submitted.append(route.request.post_data_json)
+                route.fulfill(status=200, json=empty_state)
+            page.route('**/api/connect', capture_connect)
+            page.locator('[data-action="connect"]').click()
+            expect(page.locator('#toast')).to_contain_text('Configurações lidas')
+            assert submitted == [{'transport': 'tcp', 'host': '192.0.2.10', 'tcp_port': 4404}]
+            page.unroute('**/api/connect', capture_connect)
             page.locator('[data-action="demo"]').click()
             expect(page.locator('[data-action="disconnect"]')).to_be_visible()
             expect(page.locator('.device-name')).to_have_text("Estação de demonstração")
@@ -170,7 +198,7 @@ def run():
         messages = httpx.get(url + '/api/messages').json()['messages']
         assert len(messages) == 4
         assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 1
-        print(json.dumps({"passed": True, "checks": ["desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping"], "browser_errors": errors, "serial_writes": 0}, indent=2))
+        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
         proc.terminate()
         proc.wait(timeout=10)

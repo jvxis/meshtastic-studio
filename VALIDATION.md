@@ -1,5 +1,14 @@
 # Validação inicial — 5 de setembro de 2026
 
+## Atualização: conexão por rede / TCP
+
+- **87 testes de backend aprovados**, incluindo os testes anteriores, sessões breves por USB e TCP, validação de IP/nome/porta, bloqueio de escrita em modo somente leitura, troca de identidade no mesmo endereço, falhas sem repetição e aviso ao revisar mudanças de rede via TCP.
+- Um servidor TCP de teste em loopback exercitou o protocolo binário real da biblioteca: handshake com quadros fragmentados, identificação/configuração do rádio simulado e encerramento da conexão com zero gravações e zero mensagens enviadas. Os fluxos de aplicação/releitura e mensagens foram exercitados com transportes e dados simulados; nenhuma gravação física foi feita.
+- O adaptador TCP usa limite de cinco segundos para conexão/socket e desativa a reconexão automática da biblioteca. Ambos os adaptadores enviam cada pacote uma vez, sem a espera indefinida da fila da biblioteca; somente consultas explícitas podem ser repetidas. Grants de escrita são consumidos após envio.
+- Navegador aprovado em desktop e celular: selecionar Rede / TCP mostra IP/nome e porta 4403; alternar para USB mostra a lista serial; valores são preservados ao alternar. O corpo enviado à API foi conferido sem conectar a hardware. Os testes anteriores de configurações e mensagens também passaram.
+- A tentativa somente de leitura no T-Deck físico foi recusada na porta TCP 4403, antes do handshake. O código da versão `2.7.26.54e0d8d` confirma que o servidor TCP não é iniciado em `displaymode=COLOR` (MUI). O modo de tela, Wi-Fi e demais configurações do aparelho foram preservados. Portanto, o TCP físico desse aparelho permanece sem validação funcional em modo compatível.
+- README atualizado com instalação e conexão por IP, reserva DHCP, limitações da MUI e recuperação de confirmação pendente após alterações de rede. Nenhum IP, mensagem ou segredo real foi incluído no repositório.
+
 ## Atualização: mensagens de canais e diretas
 
 - **54 testes de backend aprovados**, incluindo envio de canal e direto no simulador, revisão de uso único, mudança de canal após revisão, modo somente leitura, limite UTF-8, destino inválido, falha de envio sem repetição, confirmação tardia, deduplicação, isolamento de mensagens diretas para outros nós e janela de recepção limitada/cancelável.

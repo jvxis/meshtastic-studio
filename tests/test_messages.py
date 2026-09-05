@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from meshtastic.protobuf import mesh_pb2, portnums_pb2
 
 from server.app import Manager, create_app
-from server.device import GuardedSerial, RealDevice, text_signature
+from server.device import GuardedSerial, GuardedTCP, RealDevice, text_signature
 from server.messages import MessageBox, BROADCAST
 from server.demo import DemoDevice
 
@@ -112,8 +112,9 @@ def test_receive_window_is_bounded_cancellable_and_releases_serial(client, monke
     assert not c.get('/api/messages').json()['listening']
 
 
-def test_transport_text_grant_is_exact_single_submission_and_separate_counter(monkeypatch):
-    guard = object.__new__(GuardedSerial)
+@pytest.mark.parametrize("guard_type", [GuardedSerial, GuardedTCP])
+def test_transport_text_grant_is_exact_single_submission_and_separate_counter(monkeypatch, guard_type):
+    guard = object.__new__(guard_type)
     guard.write_grants = {}
     guard.text_grants = {}
     guard.write_packets = guard.read_packets = guard.message_packets = 0
@@ -131,7 +132,7 @@ def test_transport_text_grant_is_exact_single_submission_and_separate_counter(mo
     with pytest.raises(PermissionError):
         guard.inspect_packet(changed)
     write = Mock()
-    monkeypatch.setattr('meshtastic.serial_interface.SerialInterface._sendToRadioImpl', write)
+    monkeypatch.setattr('meshtastic.stream_interface.StreamInterface._sendToRadioImpl', write)
     guard._sendToRadio(value)
     assert write.call_count == 1 and guard.message_packets == 1 and guard.write_packets == 0
     with pytest.raises(PermissionError):

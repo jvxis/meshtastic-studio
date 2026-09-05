@@ -1,14 +1,14 @@
 # Mesh Studio
 
-Web app local, em português, para consultar e editar configurações de um Meshtastic conectado por USB/serial. A interface tem painel do dispositivo, nós conhecidos, formulários gerados pelo protocolo, editor JSON, revisão de rascunhos e mensagens de canais e diretas.
+Web app local, em português, para consultar e editar configurações de um Meshtastic conectado por USB/serial ou pela rede local via TCP. A interface tem painel do dispositivo, nós conhecidos, formulários gerados pelo protocolo, editor JSON, revisão de rascunhos e mensagens de canais e diretas.
 
-**A inicialização padrão bloqueia gravações de configuração e envio de mensagens reais no servidor e na camada serial.** É possível editar e revisar rascunhos sem enviá-los ao rádio. O simulador permite testar uma aplicação completa sem conectar hardware.
+**A inicialização padrão bloqueia gravações de configuração e envio de mensagens reais no servidor e na camada de comunicação.** É possível editar e revisar rascunhos sem enviá-los ao rádio. O simulador permite testar uma aplicação completa sem conectar hardware.
 
 ![Painel do Mesh Studio com dados fictícios de demonstração](docs/images/demo-desktop.png)
 
 ## Instalação passo a passo no Windows
 
-O app roda no computador ao qual o rádio está conectado. Não é necessário instalar Node.js, compilar o frontend ou baixar outro repositório.
+O app roda em um computador conectado ao rádio por USB ou com acesso ao IP do rádio pela rede. Não é necessário instalar Node.js, compilar o frontend ou baixar outro repositório.
 
 ### 1. Instale os pré-requisitos
 
@@ -52,19 +52,36 @@ Clique em **Explorar demonstração** para testar a interface com dados fictíci
 
 ### 5. Conecte seu rádio
 
+#### USB / Serial
+
 1. Conecte o Meshtastic por USB usando um cabo com transmissão de dados.
 2. Feche outros programas que estejam usando a porta serial, inclusive clientes web conectados por USB.
 3. Se estiver no simulador, clique primeiro em **Desconectar**.
-4. Na visão geral, clique em **Buscar portas**, selecione a porta COM correspondente ao seu equipamento e clique em **Conectar dispositivo**.
+4. Na visão geral, clique em **Buscar portas**, selecione **USB / Serial**, escolha a porta COM correspondente ao seu equipamento e clique em **Conectar dispositivo**.
 5. Aguarde a leitura. A conexão inicial pode levar cerca de 40 segundos, dependendo do dispositivo e do número de nós armazenados.
 
 Ao concluir, o app **libera automaticamente a porta serial** e mantém uma cópia da leitura na memória. Você pode navegar e preparar rascunhos com a porta livre. Cada consulta ou aplicação abre uma conexão breve e a encerra ao terminar, inclusive em caso de falha.
+
+#### Rede / TCP
+
+1. Configure previamente o Wi-Fi ou Ethernet do rádio e descubra seu IP pela tela do aparelho ou pela lista DHCP do roteador. O app não precisa do cabo USB para operar por TCP.
+2. Mantenha o computador com acesso à rede do rádio. Uma reserva DHCP no roteador ajuda a conservar o mesmo IP.
+3. Encerre a sessão atual, se houver. Na visão geral, selecione **Rede / TCP** em **Tipo de conexão**.
+4. Preencha a caixa **IP ou nome do rádio**, por exemplo `192.168.1.50` ou `radio.local`. Informe somente o endereço, sem `http://`, caminho ou porta. Nomes dependem da resolução disponível no computador; IPv6 também é aceito, sem colchetes.
+5. Mantenha **Porta TCP** em **4403**, salvo se o firmware utilizar outra porta, e clique em **Conectar dispositivo**.
+6. Após a leitura, a conexão TCP é encerrada automaticamente. Consultas, aplicação de configurações e mensagens usam esse mesmo endereço em conexões breves. A identidade do rádio é conferida novamente antes de qualquer operação, inclusive se o IP passar a apontar para outro aparelho.
+
+O TCP conecta diretamente à Client API do rádio; não depende de MQTT. A interface web continua em **http://127.0.0.1:8765**, no computador que executa o servidor. A escolha TCP não publica o app na rede. A API TCP do rádio deve ser utilizada em rede confiável, sem encaminhar sua porta para a internet.
+
+**T-Deck com MUI:** na versão de firmware `2.7.26.54e0d8d` examinada, o servidor TCP não é iniciado quando `displaymode=COLOR` (MUI), mesmo com Wi-Fi e MQTT funcionando. Veja a [condição no código do firmware](https://github.com/meshtastic/firmware/blob/54e0d8d0ab2ff56b3a9ce967e53f79e49af560fb/src/mesh/wifi/WiFiAPClient.cpp#L208). Nessa condição, use USB no app ou escolha manualmente um modo/firmware compatível com TCP, como BaseUI quando suportado. O app não muda o modo de tela nem reinicia o rádio automaticamente. Trocar o transporte não sincroniza os históricos do app e da MUI nem garante uso simultâneo da Client API.
+
+Alterar o próprio Wi-Fi, IP ou Ethernet pelo TCP pode derrubar a conexão. Se a verificação ficar pendente, confira o novo endereço ou use USB para reler antes de tentar novamente. O app não reconecta nem repete gravações ou mensagens automaticamente após uma queda TCP.
 
 Explore as configurações pelo menu lateral. Se uma seção não veio na conexão inicial, use **Consultar seção**. O firmware pode não implementar todas as seções descritas pelo protocolo.
 
 ### 6. Encerrar e usar novamente
 
-A porta já é liberada depois de cada operação. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
+A conexão com o rádio já é encerrada depois de cada operação. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
 
 Nas próximas utilizações, abra o PowerShell na pasta `meshtastic-studio` e execute novamente:
 
@@ -123,6 +140,7 @@ Na instalação manual, depois de `git pull --ff-only`, execute novamente o coma
 | Porta 8765 ocupada | Encerre a outra instância ou execute `./start.ps1 -Port 8766` e abra `http://127.0.0.1:8766`. |
 | Nenhuma porta serial encontrada | Confira o cabo de dados, a conexão USB e se o sistema operacional reconhece o dispositivo. Depois use **Buscar portas**. |
 | Porta serial ocupada | Desconecte outros clientes ou monitores seriais que estejam usando o equipamento. |
+| TCP recusado ou sem resposta | Confira IP, porta 4403, acesso pela rede e suporte do firmware; na MUI do T-Deck examinada, o servidor TCP fica desativado. |
 | Consulta sem resposta | Verifique a conexão e o suporte do firmware. O app repete uma consulta de leitura no máximo uma vez. |
 | Aplicação de rascunho bloqueada | Esse é o comportamento padrão. Consulte a seção seguinte para habilitar gravações em uma sessão futura. |
 
@@ -157,7 +175,7 @@ Configurações acessíveis apenas pelo aplicativo de tela, recursos proprietár
 
 5. Releia o dispositivo, prepare e revise o rascunho, digite `APLICAR !id-do-dispositivo` e clique em **Aplicar ao dispositivo**.
 
-A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, reconecta na porta selecionada, confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão breve. Revisar um rascunho não abre a serial. Apenas o comando exato revisado recebe uma autorização temporária na serial. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
+A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, reconecta no endereço ou porta selecionados, confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão breve. Revisar um rascunho não abre conexão com o rádio. Apenas o comando exato revisado recebe uma autorização temporária no adaptador USB ou TCP. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
 
 Cada aplicação modifica **uma seção**. Não há transação atômica entre várias seções nem rollback automático. Uma mudança pode reiniciar o dispositivo ou interromper a conexão. Se a verificação falhar, a interface informa resultado não confirmado e exige nova leitura; não repete a gravação automaticamente.
 
@@ -169,7 +187,9 @@ Cada aplicação modifica **uma seção**. Não há transação atômica entre v
 4. O envio real exige iniciar com `./start.ps1 -AllowWrites`. Em modo somente leitura, a recepção permanece disponível, mas mensagens não são transmitidas. No simulador, os envios são fictícios.
 5. Para receber, clique em **Receber por 30 segundos**. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Parar recepção** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
 
-O app abre a serial apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Fechar a aba não mantém uma recepção indefinida: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
+O app abre a conexão USB ou TCP apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Fechar a aba não mantém uma recepção indefinida: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
+
+Mensagens enviadas pelo app não são espelhadas automaticamente no histórico da tela do rádio.
 
 O histórico reúne até **300 mensagens**, apenas na memória da sessão do servidor. Inclui pacotes de texto recebidos durante operações do app, separados por canal ou pelo outro nó da conversa direta, com indicação MQTT quando presente. Não importa o histórico completo salvo pela MUI; mensagens recebidas pelo rádio enquanto o app está desconectado podem não chegar a este histórico. Recarregar a página conserva o histórico do servidor; encerrar a sessão ou reiniciar o servidor o apaga. Rascunhos de mensagens ficam na memória da página. Nenhum histórico é salvo em disco ou publicado no repositório.
 

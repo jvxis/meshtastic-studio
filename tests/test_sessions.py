@@ -12,17 +12,17 @@ from server.device import RealDevice
 from server.schema import DEFINITIONS, as_dict, prepare
 
 
-@pytest.fixture
-def borrowed(monkeypatch):
+@pytest.fixture(params=["serial", "tcp"])
+def borrowed(monkeypatch, request):
     radio = DemoDevice()
     opened = []
 
     class Transport(DemoDevice):
         demo = False
 
-        def __init__(self, port):
+        def __init__(self, port=None, *, host=None, tcp_port=4403):
             super().__init__()
-            self.port = port
+            self.port = f"{host}:{tcp_port}" if host else port
             self.node_id = radio.node_id
             self.entries = copy.deepcopy(radio.entries)
             self.close_count = 0
@@ -45,7 +45,8 @@ def borrowed(monkeypatch):
     manager = Manager(allow_writes=True)
     with TestClient(create_app(manager), base_url='http://127.0.0.1') as cli:
         cli.headers['x-mesh-token'] = cli.get('/api/session').json()['token']
-        cli.post('/api/connect', json={'port': 'FAKE'}).raise_for_status()
+        endpoint = {'transport': 'tcp', 'host': 'radio.local', 'tcp_port': 4404} if request.param == 'tcp' else {'port': 'FAKE'}
+        cli.post('/api/connect', json=endpoint).raise_for_status()
         yield cli, manager, radio, opened
     assert all(dev.close_count == 1 for dev in opened)
 
@@ -84,6 +85,25 @@ def test_apply_reconnects_once_and_closes_after_verification(borrowed):
     assert result.json()['sections']['config.lora']['values']['hop_limit'] == 4
     assert apply(cli, p).status_code == 409
     assert len(opened) == 2  # Replayed token never opens the port.
+
+
+def test_readonly_blocks_writes_before_reconnecting(borrowed):
+    cli, manager, radio, opened = borrowed
+    manager.allow_writes = False
+    p = preview(cli)
+    assert not p['can_apply']
+    assert apply(cli, p).status_code == 403
+    assert len(opened) == 1 and radio.writes == 0
+
+
+def test_network_preview_explains_tcp_disconnect(borrowed):
+    cli, manager, _, opened = borrowed
+    entry = cli.get('/api/state').json()['sections']['config.network']
+    entry['values']['wifi_ssid'] = 'changed network'
+    result = cli.post('/api/preview', json={'section': 'config.network',
+        'revision': entry['revision'], 'values': entry['values']}).json()
+    assert any('TCP' in w for w in result['warnings']) == bool(manager.device.host)
+    assert len(opened) == 1
 
 
 def test_edit_from_device_screen_blocks_stale_draft_and_releases_port(borrowed):

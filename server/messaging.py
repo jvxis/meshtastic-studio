@@ -1,4 +1,5 @@
-"""Explicit send reviews and cancellable, bounded reception windows."""
+"""Reviewed sends, bounded reception and explicit continuous desktop listening."""
+from contextlib import nullcontext
 import secrets
 import threading
 import time
@@ -7,6 +8,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, Field
 
 from .messages import MAX_TEXT_BYTES
+from .device import DeviceSession
 
 
 class MessageDraft(BaseModel):
@@ -25,12 +27,21 @@ class Messaging:
         self.message_busy = threading.Lock()
         self.listen_stop = threading.Event()
         self.listening = False
+        self.active_thread = None
+        self.active_stop = threading.Event()
+        self.active_transport = None
+        self.active_phase = 'off'
+        self.active_error = ''
+        self.disconnecting = False
 
     def message_state(self):
         # Do not take the radio lock: polling and Stop must work during reception.
         dev = self.device
         return {"messages": dev.messages.snapshot() if dev else [],
-                "listening": self.listening, "max_bytes": MAX_TEXT_BYTES,
+                "listening": self.listening or self.active_phase in ('starting', 'active', 'stopping'),
+                "listen_mode": 'active' if self.active_thread else 'window' if self.listening else 'off',
+                "active_phase": self.active_phase, "listen_error": self.active_error,
+                "max_bytes": MAX_TEXT_BYTES,
                 "can_send": bool(dev and (dev.demo or self.allow_writes)),
                 "epoch": self.epoch}
 
@@ -79,6 +90,9 @@ class Messaging:
                 draft = review['draft']
                 # Connection and fresh channel checks happen before any text packet is authorized.
                 with self.communication() as dev:
+                    if dev is self.active_transport and not dev.demo:
+                        dev.read(f'channel.{draft.channel}')
+                        dev.read('config.lora')
                     if self.check_message(dev, draft) != (review['channel_rev'], review['lora_rev']):
                         raise HTTPException(409, "O canal ou o rádio mudou. Nenhuma mensagem enviada; releia e revise novamente.")
                     box = selected.messages
@@ -96,10 +110,12 @@ class Messaging:
     def receive_messages(self):
         if not self.message_busy.acquire(blocking=False):
             raise HTTPException(409, "Já existe uma operação de mensagens em andamento.")
-        self.listen_stop.clear()
-        self.listening = True
         try:
             with self.lock:
+                if self.active_thread or self.disconnecting:
+                    raise HTTPException(409, "Pare a escuta ativa antes de iniciar uma janela de recepção.")
+                self.listen_stop.clear()
+                self.listening = True
                 with self.communication() as dev:
                     if dev.demo:
                         dev.simulate_incoming()
@@ -109,3 +125,66 @@ class Messaging:
             self.listening = False
             self.message_busy.release()
         return self.message_state()
+
+    def start_active_listening(self):
+        if not self.message_busy.acquire(blocking=False):
+            raise HTTPException(409, "Aguarde a operação de mensagens atual.")
+        try:
+            with self.lock:
+                self.require()
+                if self.active_thread or self.disconnecting:
+                    raise HTTPException(409, "A escuta ativa já está iniciando, em andamento ou encerrando.")
+                self.active_stop.clear()
+                self.active_error = ''
+                self.active_phase = 'starting'
+                self.active_thread = threading.Thread(target=self._listen_active, name='desktop reception', daemon=True)
+                self.active_thread.start()
+                return self.message_state()
+        finally:
+            self.message_busy.release()
+
+    def stop_reception(self):
+        # Must remain usable while a handshake or a send owns the radio lock.
+        self.listen_stop.set()
+        self.active_stop.set()
+        if self.active_thread:
+            self.active_phase = 'stopping'
+
+    def _listen_active(self):
+        context = None
+        entered = False
+        failure = False
+        try:
+            with self.lock:
+                if self.active_stop.is_set():
+                    return
+                selected = self.require()
+                context = selected.operation() if isinstance(selected, DeviceSession) else nullcontext(selected)
+                dev = context.__enter__()
+                entered = True
+                self.active_transport = dev
+                self.active_phase = 'stopping' if self.active_stop.is_set() else 'active'
+                if dev.demo:
+                    dev.simulate_incoming()
+                self.log('Escuta ativa', 'Conexão mantida aberta para receber e enviar pelo desktop.')
+            # The library's reader delivers incoming packets; do not hold the
+            # manager lock here, so navigation, sends and settings remain usable.
+            while not self.active_stop.wait(.25):
+                with self.lock:
+                    if not dev.connected():
+                        raise ConnectionError('Reception transport closed')
+        except Exception:
+            failure = not self.active_stop.is_set()
+        finally:
+            with self.lock:
+                self.active_transport = None
+                try:
+                    if entered:
+                        context.__exit__(None, None, None)
+                except Exception:
+                    failure = True
+                self.active_phase = 'error' if failure else 'off'
+                self.active_error = ('A escuta foi interrompida. Confira a conexão e o suporte do firmware (TCP pode estar desativado na MUI) e inicie novamente. Não houve reconexão automática.' if failure else '')
+                self.active_thread = None
+                self.log('Escuta interrompida' if failure else 'Escuta encerrada',
+                         self.active_error or 'Conexão liberada; histórico preservado.', 'warning' if failure else 'info')

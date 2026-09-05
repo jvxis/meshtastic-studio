@@ -403,6 +403,8 @@ class DeviceSession:
             self.transport = dev
             # Keep optional sections that are not part of the initial handshake.
             dev.entries = {**self.entries, **dev.entries}
+            self.entries = dev.entries
+            self.observed_at = datetime.now(timezone.utc).isoformat()
             if hasattr(dev, "attach_messages"):
                 dev.attach_messages(self.messages)
             yield dev
@@ -424,10 +426,17 @@ class DeviceSession:
                     self.transport = None
 
     def summary(self):
+        if self.transport:
+            current = self.transport.summary()
+            return {**current, "read_packets": self.read_packets + current['read_packets'],
+                    "write_packets": self.write_packets + current['write_packets'],
+                    "message_packets": self.message_packets + current.get('message_packets', 0)}
         return {**copy.deepcopy(self._summary), "read_packets": self.read_packets,
                 "write_packets": self.write_packets, "message_packets": self.message_packets}
 
     def nodes(self):
+        if self.transport:
+            return self.transport.nodes()
         return copy.deepcopy(self._nodes)
 
     def close(self):

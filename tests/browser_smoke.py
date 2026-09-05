@@ -180,6 +180,31 @@ def run():
             assert page.evaluate("Array.from(document.querySelectorAll('.chat-panel,.chat-panel h2,.chat-panel p,.chat-feed')).every(e=>e.scrollWidth<=e.clientWidth+1)")
             page.set_viewport_size({'width': 1440, 'height': 1050})
 
+            page.locator('#chat-active').click()
+            expect(page.locator('#chat-receive-status')).to_contain_text('Escuta ativa:')
+            expect(page.locator('#chat-stop')).to_be_enabled()
+            expect(page.locator('#chat-receive')).to_be_disabled()
+            page.locator('#chat-text').fill('Mensagem durante escuta ativa')
+            page.locator('#chat-review').click()
+            page.locator('#chat-send').click()
+            expect(page.locator('#review-dialog')).not_to_be_visible()
+            expect(page.locator('#chat-feed')).to_contain_text('Mensagem durante escuta ativa')
+            expect(page.locator('#chat-receive-status')).to_contain_text('Escuta ativa:')
+            page.locator('nav [data-page="radio"]').click()
+            expect(page.locator('.status-strip').first).to_contain_text('Escuta ativa.')
+            page.locator('[data-action="read-section"]').click()
+            expect(page.locator('[data-field="hop_limit"]')).to_have_value('4')
+            page.locator('nav [data-page="messages"]').click()
+            expect(page.locator('#chat-receive-status')).to_contain_text('Escuta ativa:')
+            page.screenshot(path=str(ARTIFACTS / 'active-desktop.png'), full_page=True, animations='disabled')
+            page.set_viewport_size({'width': 390, 'height': 844})
+            page.screenshot(path=str(ARTIFACTS / 'active-mobile.png'), full_page=True, animations='disabled')
+            assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+            page.locator('#chat-stop').click()
+            expect(page.locator('#chat-receive-status')).to_contain_text('Recepção pausada')
+            expect(page.locator('#chat-active')).to_be_enabled()
+            page.set_viewport_size({'width': 1440, 'height': 1050})
+
             page.locator('nav [data-page="overview"]').click()
             page.set_viewport_size({"width": 390, "height": 844})
             page.screenshot(path=str(ARTIFACTS / "demo-mobile.png"), full_page=True, animations="disabled")
@@ -196,9 +221,9 @@ def run():
         assert state["device"]["write_packets"] == 0
         assert state["device"]["simulated_writes"] == 1
         messages = httpx.get(url + '/api/messages').json()['messages']
-        assert len(messages) == 4
+        assert len(messages) == 7
         assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 1
-        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping"], "browser_errors": errors, "serial_writes": 0}, indent=2))
+        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
         proc.terminate()
         proc.wait(timeout=10)

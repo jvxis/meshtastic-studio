@@ -91,6 +91,11 @@ class Manager(Messaging):
     @contextmanager
     def communication(self):
         dev = self.require()
+        if self.active_thread:
+            if self.active_phase != 'active' or not self.active_transport or not self.active_transport.connected():
+                raise HTTPException(409, "Aguarde a escuta ativa conectar ou encerrar antes de continuar.")
+            yield self.active_transport
+            return
         with dev.operation() if isinstance(dev, DeviceSession) else nullcontext(dev) as transport:
             yield transport
 
@@ -111,6 +116,7 @@ class Manager(Messaging):
         with self.lock:
             dev = self.device
             return {"session_active": dev is not None,
+                    "active_phase": self.active_phase,
                     "observed_at": getattr(dev, "observed_at", None),
                     "connected": bool(dev and dev.connected()), "demo": bool(dev and dev.demo),
                     "writes_enabled": bool(dev and (dev.demo or self.allow_writes)),
@@ -120,15 +126,26 @@ class Manager(Messaging):
                     "nodes": dev.nodes() if dev else [], "events": self.events}
 
     def disconnect(self):
-        self.listen_stop.set()
-        with self.lock:
-            if self.device:
-                self.device.close()
-                self.log("Desconexão", "Conexão com o rádio encerrada.")
-            self.device = None
-            self.previews.clear()
-            self.message_previews.clear()
-            self.epoch = secrets.token_hex(16)
+        self.disconnecting = True
+        self.stop_reception()
+        try:
+            worker = self.active_thread
+            if worker:
+                worker.join(timeout=80)
+                if worker.is_alive():
+                    raise HTTPException(409, "A escuta ainda está encerrando a comunicação. Aguarde e tente encerrar a sessão novamente.")
+            with self.lock:
+                if self.device:
+                    self.device.close()
+                    self.log("Desconexão", "Conexão com o rádio encerrada.")
+                self.device = None
+                self.previews.clear()
+                self.message_previews.clear()
+                self.active_phase = 'off'
+                self.active_error = ''
+                self.epoch = secrets.token_hex(16)
+        finally:
+            self.disconnecting = False
 
     def connect(self, port=None, demo=False, *, host=None, tcp_port=4403):
         with self.lock:
@@ -352,9 +369,13 @@ def create_app(manager=None):
     def receive_messages():
         return manager.receive_messages()
 
+    @app.post("/api/messages/active")
+    def active_messages():
+        return manager.start_active_listening()
+
     @app.post("/api/messages/stop")
     def stop_messages():
-        manager.listen_stop.set()
+        manager.stop_reception()
         return {"stopping": True}
 
     @app.get("/")

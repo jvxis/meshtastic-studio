@@ -1,5 +1,13 @@
 # Validação inicial — 5 de setembro de 2026
 
+## Atualização: escuta ativa no desktop
+
+- **103 testes de backend aprovados**, com 16 novos casos em transportes USB e TCP simulados: recepção contínua, envio de canal e direto na mesma conexão, recepção durante a espera de confirmação, leitura e aplicação de configurações durante escuta, bloqueio no modo somente leitura, conferência do canal antes de enviar, troca de rádio, parada durante handshake/envio, liberação ao desconectar e queda sem reconexão automática.
+- Testes de navegador aprovados em desktop e celular: início da escuta, envio simulado sem parar a recepção, navegação até configurações, consulta de seção, retorno ao chat e parada explícita. Sem erros de JavaScript nem rolagem horizontal.
+- A conexão é mantida por uma tarefa no servidor enquanto o leitor da biblioteca entrega os pacotes; a espera contínua não ocupa o bloqueio das operações administrativas. A parada permanece acessível durante handshake e envio.
+- Não houve teste físico desta funcionalidade: o T-Deck não estava disponível na COM durante a implementação e seu firmware em MUI recusa TCP. Nenhuma configuração real foi alterada e nenhuma mensagem real foi enviada para validar a escuta ativa.
+- README atualizado para diferenciar as conexões breves do modo contínuo, explicar o comportamento ao fechar a aba e preservar a limitação de 300 mensagens em memória.
+
 ## Atualização: conexão por rede / TCP
 
 - **87 testes de backend aprovados**, incluindo os testes anteriores, sessões breves por USB e TCP, validação de IP/nome/porta, bloqueio de escrita em modo somente leitura, troca de identidade no mesmo endereço, falhas sem repetição e aviso ao revisar mudanças de rede via TCP.

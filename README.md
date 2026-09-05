@@ -60,7 +60,7 @@ Clique em **Explorar demonstração** para testar a interface com dados fictíci
 4. Na visão geral, clique em **Buscar portas**, selecione **USB / Serial**, escolha a porta COM correspondente ao seu equipamento e clique em **Conectar dispositivo**.
 5. Aguarde a leitura. A conexão inicial pode levar cerca de 40 segundos, dependendo do dispositivo e do número de nós armazenados.
 
-Ao concluir, o app **libera automaticamente a porta serial** e mantém uma cópia da leitura na memória. Você pode navegar e preparar rascunhos com a porta livre. Cada consulta ou aplicação abre uma conexão breve e a encerra ao terminar, inclusive em caso de falha.
+No modo padrão, ao concluir o app **libera automaticamente a porta serial** e mantém uma cópia da leitura na memória. Você pode navegar e preparar rascunhos com a porta livre. Fora da escuta ativa, cada consulta ou aplicação abre uma conexão breve e a encerra ao terminar, inclusive em caso de falha.
 
 #### Rede / TCP
 
@@ -69,7 +69,7 @@ Ao concluir, o app **libera automaticamente a porta serial** e mantém uma cópi
 3. Encerre a sessão atual, se houver. Na visão geral, selecione **Rede / TCP** em **Tipo de conexão**.
 4. Preencha a caixa **IP ou nome do rádio**, por exemplo `192.168.1.50` ou `radio.local`. Informe somente o endereço, sem `http://`, caminho ou porta. Nomes dependem da resolução disponível no computador; IPv6 também é aceito, sem colchetes.
 5. Mantenha **Porta TCP** em **4403**, salvo se o firmware utilizar outra porta, e clique em **Conectar dispositivo**.
-6. Após a leitura, a conexão TCP é encerrada automaticamente. Consultas, aplicação de configurações e mensagens usam esse mesmo endereço em conexões breves. A identidade do rádio é conferida novamente antes de qualquer operação, inclusive se o IP passar a apontar para outro aparelho.
+6. No modo padrão, após a leitura a conexão TCP é encerrada automaticamente. Consultas, aplicação de configurações e mensagens usam esse mesmo endereço em conexões breves. A identidade do rádio é conferida novamente antes de qualquer operação, inclusive se o IP passar a apontar para outro aparelho.
 
 O TCP conecta diretamente à Client API do rádio; não depende de MQTT. A interface web continua em **http://127.0.0.1:8765**, no computador que executa o servidor. A escolha TCP não publica o app na rede. A API TCP do rádio deve ser utilizada em rede confiável, sem encaminhar sua porta para a internet.
 
@@ -81,7 +81,7 @@ Explore as configurações pelo menu lateral. Se uma seção não veio na conex�
 
 ### 6. Encerrar e usar novamente
 
-A conexão com o rádio já é encerrada depois de cada operação. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
+No modo padrão, a conexão com o rádio já é encerrada depois de cada operação. Na escuta ativa, use **Parar recepção** ou **Encerrar sessão** para liberá-la. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
 
 Nas próximas utilizações, abra o PowerShell na pasta `meshtastic-studio` e execute novamente:
 
@@ -175,7 +175,7 @@ Configurações acessíveis apenas pelo aplicativo de tela, recursos proprietár
 
 5. Releia o dispositivo, prepare e revise o rascunho, digite `APLICAR !id-do-dispositivo` e clique em **Aplicar ao dispositivo**.
 
-A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, reconecta no endereço ou porta selecionados, confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão breve. Revisar um rascunho não abre conexão com o rádio. Apenas o comando exato revisado recebe uma autorização temporária no adaptador USB ou TCP. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
+A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, conecta no endereço ou porta selecionados (ou utiliza a conexão da escuta ativa), confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão breve. Revisar um rascunho não abre conexão com o rádio. Apenas o comando exato revisado recebe uma autorização temporária no adaptador USB ou TCP. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
 
 Cada aplicação modifica **uma seção**. Não há transação atômica entre várias seções nem rollback automático. Uma mudança pode reiniciar o dispositivo ou interromper a conexão. Se a verificação falhar, a interface informa resultado não confirmado e exige nova leitura; não repete a gravação automaticamente.
 
@@ -187,13 +187,27 @@ Cada aplicação modifica **uma seção**. Não há transação atômica entre v
 4. O envio real exige iniciar com `./start.ps1 -AllowWrites`. Em modo somente leitura, a recepção permanece disponível, mas mensagens não são transmitidas. No simulador, os envios são fictícios.
 5. Para receber, clique em **Receber por 30 segundos**. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Parar recepção** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
 
-O app abre a conexão USB ou TCP apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Fechar a aba não mantém uma recepção indefinida: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
+No modo padrão, o app abre a conexão USB ou TCP apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Na opção de 30 segundos, fechar a aba não prolonga a recepção: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
+
+### Escuta ativa: usar o desktop como interface principal
+
+1. Leia o rádio por **USB / Serial** ou **Rede / TCP**, conforme suporte do firmware.
+2. Abra **Mensagens** e clique em **Iniciar escuta ativa**. Aguarde o estado **Escuta ativa**; a conexão inicial pode levar vários segundos. **Parar recepção** também funciona durante essa preparação e libera o rádio depois que o handshake terminar ou expirar.
+3. A conexão permanece aberta, sem limite de 30 segundos, capturando mensagens dos canais e diretas. Você pode trocar de conversa, escrever, revisar e enviar pela mesma conexão enquanto recebe. Antes de cada envio real, o app relê o canal e a configuração LoRa para detectar mudanças desde a revisão. Nenhum envio é automático.
+4. É possível navegar pelo app, consultar seções e aplicar configurações com as mesmas proteções de revisão e confirmação. Essas operações utilizam a conexão existente; nenhuma segunda porta ou socket é aberto. Operações administrativas e envios são feitos um de cada vez, enquanto o leitor recebe pacotes em segundo plano.
+5. Clique em **Parar recepção** para fechar a conexão e conservar o histórico, ou em **Encerrar sessão** para fechar e apagar o histórico. Se houver um envio ou consulta em andamento, o encerramento espera essa operação terminar.
+
+**A escuta ativa continua ao mudar de página ou fechar a aba do navegador.** Ela termina ao parar explicitamente, encerrar a sessão, desligar o servidor ou perder a conexão. Para continuar após uma queda, confira a conexão e inicie novamente; não há reconexão automática nem repetição de mensagens. Uma alteração de configuração que reinicie o rádio também pode interromper a escuta.
+
+O modo somente leitura permite escutar, mas continua bloqueando mensagens enviadas e alterações de configuração. O histórico permanece limitado a 300 mensagens em memória, sem gravação em disco. No simulador, iniciar a escuta acrescenta mensagens fictícias para demonstração.
+
+Manter a conexão aberta pode pausar as atualizações da MUI; esse modo prioriza o uso pelo desktop. A escuta ativa não habilita o TCP em firmwares/modos que o desativam, como a MUI do T-Deck examinada. Use USB nesse caso, ou um modo/firmware compatível com TCP.
 
 Mensagens enviadas pelo app não são espelhadas automaticamente no histórico da tela do rádio.
 
 O histórico reúne até **300 mensagens**, apenas na memória da sessão do servidor. Inclui pacotes de texto recebidos durante operações do app, separados por canal ou pelo outro nó da conversa direta, com indicação MQTT quando presente. Não importa o histórico completo salvo pela MUI; mensagens recebidas pelo rádio enquanto o app está desconectado podem não chegar a este histórico. Recarregar a página conserva o histórico do servidor; encerrar a sessão ou reiniciar o servidor o apaga. Rascunhos de mensagens ficam na memória da página. Nenhum histórico é salvo em disco ou publicado no repositório.
 
-O envio abre uma conexão breve, confere novamente o rádio, o canal e a configuração LoRa, envia um pacote de texto e aguarda confirmação de rede por até 15 segundos. A revisão é de uso único, válida por cinco minutos. Alterar o canal ou o rádio depois da revisão bloqueia o envio. O app não repete uma mensagem automaticamente; retransmissões do próprio protocolo no rádio ainda podem ocorrer.
+O envio utiliza a conexão da escuta ativa ou abre uma conexão breve, confere novamente o rádio, o canal e a configuração LoRa, envia um pacote de texto e aguarda confirmação de rede por até 15 segundos. A revisão é de uso único, válida por cinco minutos. Alterar o canal ou o rádio depois da revisão bloqueia o envio. O app não repete uma mensagem automaticamente; retransmissões do próprio protocolo no rádio ainda podem ocorrer.
 
 - **ACK de rede:** houve uma confirmação de rede; não significa que a pessoa leu a mensagem nem confirma entrega a todos os membros de um canal.
 - **Sem confirmação de rede:** nenhuma confirmação foi observada dentro da janela. A mensagem ainda pode ter chegado; uma confirmação tardia pode atualizar o histórico em uma recepção posterior.

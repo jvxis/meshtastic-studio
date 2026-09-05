@@ -1,5 +1,5 @@
 """Mesh Studio: loopback API, in-memory drafts and fail-closed serial access."""
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager, nullcontext
 import copy
 from datetime import datetime, timezone
 import hashlib
@@ -17,7 +17,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel, Field
 from serial.tools import list_ports
 from .schema import DEFINITIONS, OWNER_FIELDS, as_dict, public_schema, redact, prepare, diff
-from .device import RealDevice, write_command
+from .device import DeviceSession, write_command
 from .demo import DemoDevice
 from meshtastic.protobuf import mesh_pb2
 
@@ -54,9 +54,15 @@ class Manager:
         self.events = self.events[:100]
 
     def require(self):
-        if not self.device or not self.device.connected():
+        if not self.device or (not isinstance(self.device, DeviceSession) and not self.device.connected()):
             raise HTTPException(409, "Conecte um dispositivo antes de continuar.")
         return self.device
+
+    @contextmanager
+    def communication(self):
+        dev = self.require()
+        with dev.operation() if isinstance(dev, DeviceSession) else nullcontext(dev) as transport:
+            yield transport
 
     def revision(self, value):
         raw = value.SerializeToString(deterministic=True) if hasattr(value, "SerializeToString") else json.dumps(value, sort_keys=True).encode()
@@ -74,7 +80,9 @@ class Manager:
     def state(self):
         with self.lock:
             dev = self.device
-            return {"connected": bool(dev and dev.connected()), "demo": bool(dev and dev.demo),
+            return {"session_active": dev is not None,
+                    "observed_at": getattr(dev, "observed_at", None),
+                    "connected": bool(dev and dev.connected()), "demo": bool(dev and dev.demo),
                     "writes_enabled": bool(dev and (dev.demo or self.allow_writes)),
                     "server_writes_enabled": self.allow_writes, "epoch": self.epoch,
                     "device": dev.summary() if dev else None,
@@ -96,16 +104,17 @@ class Manager:
                 raise HTTPException(409, "Desconecte a sessão atual antes de abrir outra.")
             if not demo and port not in {p.device for p in list_ports.comports()}:
                 raise HTTPException(400, "Escolha uma porta serial presente nesta máquina.")
-            self.device = DemoDevice() if demo else RealDevice(port)
+            self.device = DemoDevice() if demo else DeviceSession(port)
             self.epoch = secrets.token_hex(16)
-            self.log("Demonstração" if demo else "Conectado", "Dispositivo simulado, sem acesso à serial." if demo else f"Leitura inicial de {port}. Nenhuma configuração enviada.")
+            self.log("Demonstração" if demo else "Leitura concluída", "Dispositivo simulado, sem acesso à serial." if demo else f"Leitura de {port} concluída; porta liberada automaticamente. Nenhuma configuração enviada.")
             return self.state()
 
     def read(self, key):
         with self.lock:
             if key not in DEFINITIONS:
                 raise HTTPException(404, "Seção desconhecida.")
-            self.require().read(key)
+            with self.communication() as dev:
+                dev.read(key)
             self.log("Consulta", DEFINITIONS[key]["name"])
             return self.state()
 
@@ -145,37 +154,50 @@ class Manager:
                     "confirmation": f"APLICAR {dev.node_id}", "expires_in": 300,
                     "can_apply": dev.demo or self.allow_writes, "demo": dev.demo}
 
+    @contextmanager
+    def communication_for_apply(self, body):
+        dev = self.require()
+        if not dev.demo and not self.allow_writes:
+            raise HTTPException(403, "A gravação real está bloqueada no servidor.")
+        preview = self.previews.get(body.token)
+        if not preview or preview["expires"] < time.monotonic() or preview["epoch"] != self.epoch:
+            raise HTTPException(409, "A revisão expirou. Revise o rascunho novamente.")
+        if body.confirmation != f"APLICAR {dev.node_id}" or preview["node_id"] != dev.node_id:
+            raise HTTPException(400, "A confirmação precisa corresponder ao dispositivo selecionado.")
+        with self.communication() as transport:
+            yield transport
+
     def apply(self, body):
         with self.lock:
-            dev = self.require()
-            if not dev.demo and not self.allow_writes:
-                raise HTTPException(403, "A gravação real está bloqueada no servidor. Este processo está em modo somente leitura.")
-            preview = self.previews.get(body.token)
-            if not preview or preview["expires"] < time.monotonic() or preview["epoch"] != self.epoch:
-                raise HTTPException(409, "A revisão expirou. Revise o rascunho novamente.")
-            if body.confirmation != f"APLICAR {dev.node_id}" or preview["node_id"] != dev.node_id:
-                raise HTTPException(400, "A confirmação precisa corresponder ao dispositivo conectado.")
-            self.previews.pop(body.token)
-            key = preview["section"]
-            current = dev.read(key)  # Detect edits by another client before sending anything.
-            if self.revision(current) != preview["revision"]:
-                raise HTTPException(409, "O dispositivo mudou desde a leitura. Nenhuma alteração foi enviada; atualize e revise novamente.")
-            try:
-                actual = dev.write(key, preview["target"])
-                target_dict = as_dict(preview["target"]) if hasattr(actual, "SerializeToString") else preview["target"]
-                actual_dict = as_dict(actual) if hasattr(actual, "SerializeToString") else actual
-                if key == "owner":
-                    target_dict = {k: v for k, v in target_dict.items() if k in OWNER_FIELDS}
-                    actual_dict = {k: v for k, v in actual_dict.items() if k in OWNER_FIELDS}
-                if diff(target_dict, actual_dict):
-                    raise RuntimeError("A releitura não corresponde ao rascunho.")
-            except Exception:
-                dev.entries.pop(key, None)
+            with self.communication_for_apply(body) as dev:
+                if not dev.demo and not self.allow_writes:
+                    raise HTTPException(403, "A gravação real está bloqueada no servidor. Este processo está em modo somente leitura.")
+                preview = self.previews.get(body.token)
+                if not preview or preview["expires"] < time.monotonic() or preview["epoch"] != self.epoch:
+                    raise HTTPException(409, "A revisão expirou. Revise o rascunho novamente.")
+                if body.confirmation != f"APLICAR {dev.node_id}" or preview["node_id"] != dev.node_id:
+                    raise HTTPException(400, "A confirmação precisa corresponder ao dispositivo conectado.")
+                self.previews.pop(body.token)
+                key = preview["section"]
+                current = dev.read(key)  # Detect edits by another client before sending anything.
+                if self.revision(current) != preview["revision"]:
+                    raise HTTPException(409, "O dispositivo mudou desde a leitura. Nenhuma alteração foi enviada; atualize e revise novamente.")
+                try:
+                    actual = dev.write(key, preview["target"])
+                    target_dict = as_dict(preview["target"]) if hasattr(actual, "SerializeToString") else preview["target"]
+                    actual_dict = as_dict(actual) if hasattr(actual, "SerializeToString") else actual
+                    if key == "owner":
+                        target_dict = {k: v for k, v in target_dict.items() if k in OWNER_FIELDS}
+                        actual_dict = {k: v for k, v in actual_dict.items() if k in OWNER_FIELDS}
+                    if diff(target_dict, actual_dict):
+                        raise RuntimeError("A releitura não corresponde ao rascunho.")
+                except Exception:
+                    dev.entries.pop(key, None)
+                    self.previews.clear()
+                    self.log("Verificação pendente", f"{DEFINITIONS[key]['name']}: envio iniciado, resultado não confirmado. Releia antes de tentar novamente.", "warning")
+                    raise HTTPException(502, "A operação foi iniciada, mas não foi possível confirmar a gravação. O dispositivo pode ter reiniciado. Reconecte e releia; não repita a aplicação sem conferir.") from None
                 self.previews.clear()
-                self.log("Verificação pendente", f"{DEFINITIONS[key]['name']}: envio iniciado, resultado não confirmado. Releia antes de tentar novamente.", "warning")
-                raise HTTPException(502, "A operação foi iniciada, mas não foi possível confirmar a gravação. O dispositivo pode ter reiniciado. Reconecte e releia; não repita a aplicação sem conferir.") from None
-            self.previews.clear()
-            self.log("Simulação aplicada" if dev.demo else "Gravação verificada", DEFINITIONS[key]["name"], "success")
+                self.log("Simulação aplicada" if dev.demo else "Gravação verificada", DEFINITIONS[key]["name"], "success")
             return self.state()
 
 
@@ -263,8 +285,10 @@ def create_app(manager=None):
             port, demo_mode = dev.port, dev.demo
             if demo_mode:
                 return manager.state()
-            manager.disconnect()
-            return manager.connect(port, demo=False)
+            with manager.communication():
+                pass
+            manager.previews.clear()
+            return manager.state()
 
     @app.post("/api/read/{key}")
     def read(key: str):

@@ -1,5 +1,16 @@
 # Validação inicial — 5 de setembro de 2026
 
+## Atualização: conexões breves e campos obsoletos
+
+- **35 testes de backend aprovados**, incluindo liberação da porta após leitura, atualização, aplicação simulada e erros; rejeição de outro rádio na mesma porta; alterações concorrentes pela tela; proteção de campos obsoletos e preservação quando omitidos do JSON.
+- Teste de navegador aprovado em desktop e celular, incluindo GPS sem o controle antigo editável, consulta dos campos obsoletos e rejeição de alteração pelo JSON. Nenhuma gravação física nos testes automatizados.
+- Na validação real do T-Deck, a leitura inicial levou 12,7 segundos e uma consulta posterior de rede levou 27,2 segundos, incluindo nova conexão. Ambas terminaram com a porta liberada e a leitura preservada. **Zero pacotes de gravação nesta validação**.
+- A leitura real continuou indicando Wi-Fi e MQTT habilitados, proxy MQTT desativado e `gps_mode=ENABLED`. Esses valores são configurações, não uma nova prova de conexão com o broker ou de posição GPS obtida.
+- O navegador exibiu a leitura real com a porta livre, manteve os controles de consulta disponíveis e mostrou `gps_mode` sem oferecer edição de `gps_enabled`. Navegar pelas páginas não enviou requisições de operação nem reabriu a serial.
+- O diagnóstico anterior confirmou que encerrar a conexão serial permitia à Home voltar a atualizar os indicadores de Wi-Fi e MQTT; o proprietário confirmou a recuperação da tela. O novo fluxo aplica essa liberação após cada operação. Ainda pode haver uma pausa da tela enquanto a operação está em andamento.
+
+Os registros abaixo descrevem a versão inicial, antes dessas melhorias.
+
 ## Testes sem hardware
 
 - `python -m pytest -q`: **27 testes aprovados**. Dois avisos de depreciação de dependências do cliente de testes; nenhuma falha.

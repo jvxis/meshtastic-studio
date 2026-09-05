@@ -57,7 +57,12 @@ def message_schema(desc, depth=0):
     fields = []
     for field in desc.fields:
         f = {"name": field.name, "secret": is_secret(field.name),
-             "repeated": field.is_repeated, "readonly": field.name in {"version", "index"}}
+             "repeated": field.is_repeated, "deprecated": field.GetOptions().deprecated,
+             "readonly": field.name in {"version", "index"} or field.GetOptions().deprecated}
+        if f["deprecated"]:
+            f["hint"] = "Obsoleto no protocolo instalado. Preservado para compatibilidade; não editável."
+            if field.name == "gps_enabled":
+                f["hint"] = "Campo antigo: use gps_mode para controlar o GPS. Este valor não indica o estado atual do GPS."
         if field.message_type:
             f["kind"] = "object"
             f["fields"] = message_schema(field.message_type, depth + 1) if depth < 6 else []
@@ -186,6 +191,28 @@ def diff(before, after, prefix=""):
     return result
 
 
+def protect_readonly(candidate, original, fields, prefix=""):
+    """Protect nested legacy fields even in JSON; omission must not reset them."""
+    for f in fields:
+        name = f["name"]
+        path = f"{prefix}.{name}".strip(".")
+        if f.get("deprecated") and name not in candidate:
+            if name in original:
+                candidate[name] = copy.deepcopy(original[name])
+        if f.get("readonly") and candidate.get(name) != original.get(name):
+            raise ValueError(f"O campo {path} é somente leitura.")
+        if f["kind"] == "object":
+            if f["repeated"]:
+                old = original.get(name, [])
+                for i, item in enumerate(candidate.get(name, [])):
+                    protect_readonly(item, old[i] if i < len(old) else {}, f["fields"], f"{path}.{i}")
+            else:
+                child = candidate.get(name, {})
+                protect_readonly(child, original.get(name, {}), f["fields"], path)
+                if child:
+                    candidate[name] = child
+
+
 def prepare(key, candidate, original):
     definition = DEFINITIONS[key]
     base = as_dict(original) if definition["descriptor"] else copy.deepcopy(original)
@@ -193,9 +220,7 @@ def prepare(key, candidate, original):
         base = {k: v for k, v in base.items() if k in OWNER_FIELDS}
     merged = restore_secrets(candidate, base)
     validate_types(merged, definition["fields"])
-    for f in definition["fields"]:
-        if f.get("readonly") and merged.get(f["name"]) != base.get(f["name"]):
-            raise ValueError(f"O campo {f['name']} é somente leitura.")
+    protect_readonly(merged, base, definition["fields"])
     if key == "owner":
         if not merged.get("long_name", "").strip() or not merged.get("short_name", "").strip():
             raise ValueError("Preencha o nome e o nome curto.")

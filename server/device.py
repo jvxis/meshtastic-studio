@@ -1,5 +1,7 @@
 """Local-only adapter with a packet-level allowlist and explicit write grants."""
 import copy
+from contextlib import contextmanager
+from datetime import datetime, timezone
 import hashlib
 import threading
 import time
@@ -113,20 +115,26 @@ class RealDevice:
 
     def __init__(self, port):
         self.port = port
-        self.iface = GuardedSerial(devPath=port, timeout=40)
-        self.node_num = self.iface.myInfo.my_node_num
-        self.node_id = f"!{self.node_num:08x}"
-        self.metadata = as_dict(self.iface.metadata) if self.iface.metadata else {}
-        self.entries = {}
-        for prefix, config in [("config", self.iface.localNode.localConfig), ("module", self.iface.localNode.moduleConfig)]:
-            for f, value in config.ListFields():
-                if f.message_type:
-                    self.entries[f"{prefix}.{f.name}"] = copy.deepcopy(value)
-        for ch in self.iface.localNode.channels or []:
-            self.entries[f"channel.{ch.index}"] = copy.deepcopy(ch)
-        local = (self.iface.nodesByNum or {}).get(self.iface.myInfo.my_node_num, {})
-        if local.get("user"):
-            self.entries["owner"] = json_format.ParseDict(local["user"], mesh_pb2.User(), ignore_unknown_fields=True)
+        self.iface = GuardedSerial(devPath=port, timeout=40, connectNow=False)
+        try:
+            self.iface.connect()
+            self.iface.waitForConfig()
+            self.node_num = self.iface.myInfo.my_node_num
+            self.node_id = f"!{self.node_num:08x}"
+            self.metadata = as_dict(self.iface.metadata) if self.iface.metadata else {}
+            self.entries = {}
+            for prefix, config in [("config", self.iface.localNode.localConfig), ("module", self.iface.localNode.moduleConfig)]:
+                for f, value in config.ListFields():
+                    if f.message_type:
+                        self.entries[f"{prefix}.{f.name}"] = copy.deepcopy(value)
+            for ch in self.iface.localNode.channels or []:
+                self.entries[f"channel.{ch.index}"] = copy.deepcopy(ch)
+            local = (self.iface.nodesByNum or {}).get(self.iface.myInfo.my_node_num, {})
+            if local.get("user"):
+                self.entries["owner"] = json_format.ParseDict(local["user"], mesh_pb2.User(), ignore_unknown_fields=True)
+        except Exception:
+            self.iface.close()
+            raise
 
     def connected(self):
         return bool(self.iface.isConnected.is_set() and not self.iface._wantExit
@@ -236,3 +244,62 @@ class RealDevice:
     def close(self):
         self.iface.write_grants.clear()
         self.iface.close()
+
+
+class DeviceSession:
+    """Keep a snapshot, borrowing the serial transport only during explicit I/O."""
+    demo = False
+
+    def __init__(self, port):
+        self.port = port
+        self.node_id = None
+        self.entries = {}
+        self.transport = None
+        self._summary = {}
+        self._nodes = []
+        self.read_packets = self.write_packets = 0
+        self.observed_at = None
+        with self.operation():
+            pass
+
+    def connected(self):
+        return bool(self.transport and self.transport.connected())
+
+    @contextmanager
+    def operation(self):
+        dev = RealDevice(self.port)
+        accepted = False
+        try:
+            if self.node_id and dev.node_id != self.node_id:
+                raise ValueError("Outro rádio está nesta porta. Encerre a sessão e leia o dispositivo novamente.")
+            accepted = True
+            self.node_id = dev.node_id
+            self.transport = dev
+            # Keep optional sections that are not part of the initial handshake.
+            dev.entries = {**self.entries, **dev.entries}
+            yield dev
+        finally:
+            try:
+                if accepted:
+                    self.entries = dev.entries
+                    self._summary = dev.summary()
+                    self._nodes = dev.nodes()
+                    self.read_packets += self._summary["read_packets"]
+                    self.write_packets += self._summary["write_packets"]
+                    self.observed_at = datetime.now(timezone.utc).isoformat()
+            finally:
+                try:
+                    dev.close()
+                finally:
+                    self.transport = None
+
+    def summary(self):
+        return {**copy.deepcopy(self._summary), "read_packets": self.read_packets,
+                "write_packets": self.write_packets}
+
+    def nodes(self):
+        return copy.deepcopy(self._nodes)
+
+    def close(self):
+        if self.transport:
+            self.transport.close()

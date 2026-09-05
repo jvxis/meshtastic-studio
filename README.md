@@ -58,11 +58,13 @@ Clique em **Explorar demonstração** para testar a interface com dados fictíci
 4. Na visão geral, clique em **Buscar portas**, selecione a porta COM correspondente ao seu equipamento e clique em **Conectar dispositivo**.
 5. Aguarde a leitura. A conexão inicial pode levar cerca de 40 segundos, dependendo do dispositivo e do número de nós armazenados.
 
+Ao concluir, o app **libera automaticamente a porta serial** e mantém uma cópia da leitura na memória. Você pode navegar e preparar rascunhos com a porta livre. Cada consulta ou aplicação abre uma conexão breve e a encerra ao terminar, inclusive em caso de falha.
+
 Explore as configurações pelo menu lateral. Se uma seção não veio na conexão inicial, use **Consultar seção**. O firmware pode não implementar todas as seções descritas pelo protocolo.
 
 ### 6. Encerrar e usar novamente
 
-Use **Desconectar** para liberar a porta serial. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
+A porta já é liberada depois de cada operação. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
 
 Nas próximas utilizações, abra o PowerShell na pasta `meshtastic-studio` e execute novamente:
 
@@ -126,7 +128,7 @@ Na instalação manual, depois de `git pull --ff-only`, execute novamente o coma
 
 ## Cobertura
 
-O catálogo desta versão possui **36 seções e 254 campos principais**, além de campos de estruturas internas:
+O catálogo desta versão possui **36 seções e 254 campos principais** no protocolo, além de campos de estruturas internas. Campos marcados como obsoletos pelo protocolo ficam em uma área recolhida, somente para consulta, e não aparecem como controles editáveis:
 
 | Área | Configurações |
 | --- | --- |
@@ -155,9 +157,18 @@ Configurações acessíveis apenas pelo aplicativo de tela, recursos proprietár
 
 5. Releia o dispositivo, prepare e revise o rascunho, digite `APLICAR !id-do-dispositivo` e clique em **Aplicar ao dispositivo**.
 
-A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, relê a seção e rejeita alterações concorrentes. Apenas o comando exato revisado recebe uma autorização temporária na serial. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
+A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, reconecta na porta selecionada, confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão breve. Revisar um rascunho não abre a serial. Apenas o comando exato revisado recebe uma autorização temporária na serial. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
 
 Cada aplicação modifica **uma seção**. Não há transação atômica entre várias seções nem rollback automático. Uma mudança pode reiniciar o dispositivo ou interromper a conexão. Se a verificação falhar, a interface informa resultado não confirmado e exige nova leitura; não repete a gravação automaticamente.
+
+## T-Deck: tela, GPS e conectividade
+
+A [Meshtastic UI compartilha a Client API com os clientes externos](https://meshtastic.org/docs/configuration/device-uis/meshtasticui/#accessing-the-client-api). Uma conexão serial mantida aberta pode impedir que a Home atualize indicadores como Wi-Fi e MQTT. Por isso o Mesh Studio libera a porta ao terminar cada operação, sem depender de fechar a aba ou de um temporizador de inatividade. Durante uma consulta ou aplicação a tela ainda pode pausar por alguns instantes; uma nova conexão pode levar cerca de 40 segundos. Não há atualização contínua em segundo plano. O app mostra o horário da última consulta ao rádio; cada seção mantém sua última leitura, e a telemetria pode ser mais antiga.
+
+- **GPS:** use `gps_mode`. O antigo `gps_enabled` é obsoleto e seu valor não indica o estado atual do GPS. GPS habilitado não garante coordenadas: é necessário obter uma posição dos satélites.
+- **Campos obsoletos:** o formulário os apresenta somente em “Campos obsoletos · somente leitura”. Alterações pelo JSON/API são rejeitadas; omitir esses campos preserva o valor existente, inclusive em estruturas internas. A indicação vem do protocolo instalado, não de uma detecção completa das capacidades de cada firmware.
+- **Wi-Fi e MQTT:** “Habilitado” descreve a configuração salva, não confirma conexão efetiva. O painel identifica esses valores como configuração da última leitura. `proxy_to_client_enabled` escolhe entre MQTT pela internet do aplicativo e MQTT pela rede do próprio rádio; não controla a ativação do Wi-Fi.
+- **Heap e LVGL na Home:** mostram memória livre do firmware e da interface gráfica, respectivamente, em bytes e porcentagem livre no T-Deck. O ícone cinza indica que a atualização do monitor de memória está pausada. Um toque curto no ícone alterna a atualização; ele não desliga a memória nem a interface. Esse comportamento foi conferido no [código da interface usada pelo firmware 2.7.26](https://github.com/meshtastic/device-ui/blob/1c45ebc7433acb8ba3fe96a6f7deca9c43fa54cf/source/graphics/TFT/TFTView_320x240.cpp#L1517).
 
 ## Dados e acesso
 
@@ -166,7 +177,7 @@ Cada aplicação modifica **uma seção**. Não há transação atômica entre v
 - Senhas, PSKs, PINs e chaves privadas retornam como `__MESH_SECRET_UNCHANGED__`. Esse marcador preserva o valor no servidor, inclusive em edições de outros campos da mesma seção.
 - Rascunhos ficam na memória da página, sem `localStorage`. A leitura fica na memória do servidor, sem banco de dados.
 - A exportação JSON contém segredos ocultos: é um relatório de consulta, **não um backup restaurável**.
-- O contador “gravações na serial” contabiliza pacotes de modificação efetivamente enviados nesta conexão. Consultas, handshake, heartbeat e desconexão não são gravações de configuração.
+- O contador “gravações na serial” contabiliza pacotes de modificação efetivamente enviados nesta sessão, somando suas conexões breves. Consultas, handshake, heartbeat e desconexão não são gravações de configuração.
 - O registro de nós pode conter dados antigos e entradas MQTT. Não representa uma lista de rádios atualmente ao alcance direto.
 
 ## Desenvolvimento e testes

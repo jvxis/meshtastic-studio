@@ -78,6 +78,23 @@ def run():
             page.locator('#cancel-review').click()
             page.locator('[data-action="discard"]').click()
 
+            page.locator('nav [data-page="device"]').click()
+            page.locator('[data-section="config.position"]').click()
+            expect(page.locator('[data-field="gps_enabled"]')).to_have_count(0)
+            expect(page.locator('[data-field="gps_mode"]')).to_be_enabled()
+            page.locator('.legacy-fields summary').first.click()
+            expect(page.locator('.legacy-fields')).to_contain_text('use gps_mode')
+            page.locator('[data-action="json"]').click()
+            values = json.loads(page.locator('#json-editor').input_value())
+            values['gps_enabled'] = not values['gps_enabled']
+            page.locator('#json-editor').fill(json.dumps(values))
+            page.locator('[data-action="review"]').click()
+            expect(page.locator('#toast')).to_contain_text('somente leitura')
+            # This deliberately rejected preview produces one expected Chrome console error.
+            assert errors == ['Failed to load resource: the server responded with a status of 400 (Bad Request)']
+            errors.clear()
+            page.locator('[data-action="discard"]').click()
+
             page.locator('nav [data-page="modules"]').click()
             page.locator('[data-section="module.tak"]').click()
             expect(page.locator('.editor-head h2')).to_have_text("TAK")

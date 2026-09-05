@@ -60,7 +60,7 @@ Clique em **Explorar demonstração** para testar a interface com dados fictíci
 4. Na visão geral, clique em **Buscar portas**, selecione **USB / Serial**, escolha a porta COM correspondente ao seu equipamento e clique em **Conectar dispositivo**.
 5. Aguarde a leitura. A conexão inicial pode levar cerca de 40 segundos, dependendo do dispositivo e do número de nós armazenados.
 
-**Desktop** é a opção padrão da interface: **Conectar dispositivo** lê o rádio e mantém essa mesma conexão aberta, já recebendo mensagens. Não é preciso iniciar uma segunda escuta. Mensagens e configurações usam a conexão existente. Para guardar somente uma leitura e liberar a porta após cada operação, selecione **Leitura pontual** antes de conectar.
+**Conectar dispositivo** lê o rádio e mantém essa mesma conexão aberta, já recebendo mensagens. Não há escolha adicional de modo nem uma segunda etapa de escuta. Mensagens e configurações usam a conexão existente. Para liberar o rádio, use **Desconectar** na página Mensagens.
 
 #### Rede / TCP
 
@@ -69,7 +69,7 @@ Clique em **Explorar demonstração** para testar a interface com dados fictíci
 3. Encerre a sessão atual, se houver. Na visão geral, selecione **Rede / TCP** em **Tipo de conexão**.
 4. Preencha a caixa **IP ou nome do rádio**, por exemplo `192.168.1.50` ou `radio.local`. Informe somente o endereço, sem `http://`, caminho ou porta. Nomes dependem da resolução disponível no computador; IPv6 também é aceito, sem colchetes.
 5. Mantenha **Porta TCP** em **4403**, salvo se o firmware utilizar outra porta, e clique em **Conectar dispositivo**.
-6. Em **Desktop**, a primeira conexão TCP permanece aberta para mensagens e configurações. Em **Leitura pontual**, ela é encerrada após cada operação. A identidade do rádio é conferida em cada nova conexão, inclusive se o IP passar a apontar para outro aparelho.
+6. A primeira conexão TCP permanece aberta para mensagens e configurações. A identidade do rádio é conferida em cada nova conexão, inclusive se o IP passar a apontar para outro aparelho.
 
 O TCP conecta diretamente à Client API do rádio; não depende de MQTT. A interface web continua em **http://127.0.0.1:8765**, no computador que executa o servidor. A escolha TCP não publica o app na rede. A API TCP do rádio deve ser utilizada em rede confiável, sem encaminhar sua porta para a internet.
 
@@ -81,7 +81,7 @@ Explore as configurações pelo menu lateral. Se uma seção não veio na conex�
 
 ### 6. Encerrar e usar novamente
 
-Em **Desktop**, use **Desconectar** na página Mensagens para liberar o rádio e preservar o histórico na sessão. **Conectar ao rádio** retoma a recepção. Em **Leitura pontual**, a conexão é encerrada depois de cada operação. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
+Use **Desconectar** na página Mensagens para liberar o rádio e preservar o histórico na sessão. **Conectar ao rádio** retoma a recepção. Use **Encerrar sessão** para remover a leitura da memória do servidor e os rascunhos da página atual; no simulador, use **Desconectar**. No terminal do servidor, pressione **Ctrl+C** para encerrar o app.
 
 Nas próximas utilizações, abra o PowerShell na pasta `meshtastic-studio` e execute novamente:
 
@@ -176,7 +176,7 @@ Configurações acessíveis apenas pelo aplicativo de tela, recursos proprietár
 
 5. Releia o dispositivo, prepare e revise o rascunho, digite `APLICAR !id-do-dispositivo` e clique em **Aplicar ao dispositivo**.
 
-A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, conecta no endereço ou porta selecionados (ou utiliza a conexão da escuta ativa), confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão breve. Revisar um rascunho não abre conexão com o rádio. Apenas o comando exato revisado recebe uma autorização temporária no adaptador USB ou TCP. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
+O indicador **Gravação habilitada** ou **Somente leitura** mostra a permissão do servidor, inclusive antes de conectar um rádio. Conectar ou desconectar não altera essa permissão. A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, conecta no endereço ou porta selecionados (ou utiliza a conexão da escuta ativa), confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão. Revisar um rascunho não abre conexão com o rádio. Apenas o comando exato revisado recebe uma autorização temporária no adaptador USB ou TCP. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
 
 Cada aplicação modifica **uma seção**. Não há transação atômica entre várias seções nem rollback automático. Uma mudança pode reiniciar o dispositivo ou interromper a conexão. Se a verificação falhar, a interface informa resultado não confirmado e exige nova leitura; não repete a gravação automaticamente.
 
@@ -186,9 +186,9 @@ Cada aplicação modifica **uma seção**. Não há transação atômica entre v
 2. Em **Conversa**, escolha um canal habilitado ou uma conversa direta com um nó conhecido. Para uma mensagem direta, selecione também o canal de envio compartilhado com o destinatário.
 3. Escreva até **233 bytes UTF-8**; letras acentuadas e emojis podem ocupar mais de um byte. Clique em **Enviar** ou pressione **Enter**. **Shift+Enter** insere uma quebra de linha. Não há modal de revisão de mensagens.
 4. O envio real exige iniciar com `./start.ps1 -AllowWrites`. Em modo somente leitura, a recepção permanece disponível, mas mensagens não são transmitidas. No simulador, os envios são fictícios.
-5. Em **Desktop**, a recepção já está ativa. A opção **Receber por 30 segundos** fica dentro de **Sobre recepção e entrega**, para uso pontual. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Desconectar** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
+5. Ao conectar, a recepção já está ativa. A opção **Receber por 30 segundos** fica dentro de **Sobre recepção e entrega**, para uso pontual. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Desconectar** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.
 
-Em **Desktop**, a recepção começa na primeira conexão e permanece ativa ao navegar. Em **Leitura pontual**, o app abre a conexão USB ou TCP apenas durante as operações. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Na opção de 30 segundos, fechar a aba não prolonga a recepção: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
+A recepção começa na primeira conexão e permanece ativa ao navegar. **Durante a recepção, a Home do T-Deck pode pausar suas atualizações.** Ao terminar ou parar, a porta é liberada. Na opção de 30 segundos, fechar a aba não prolonga a recepção: a janela termina no servidor. Receber continuamente e manter a MUI atualizada simultaneamente não é garantido pela Client API do rádio.
 
 O campo é liberado imediatamente após clicar em Enviar. Você pode escrever o próximo rascunho e trocar de conversa enquanto o app aguarda a confirmação da mensagem atual. O app envia uma mensagem por vez; Enter repetido ou clique duplo não gera um segundo envio enquanto o primeiro está em andamento. Texto vazio ou acima do limite de bytes mantém Enviar desabilitado.
 
@@ -225,7 +225,7 @@ No simulador, **Simular recebimento** adiciona uma mensagem de canal e uma diret
 
 ## T-Deck: tela, GPS e conectividade
 
-A [Meshtastic UI compartilha a Client API com os clientes externos](https://meshtastic.org/docs/configuration/device-uis/meshtasticui/#accessing-the-client-api). Uma conexão serial mantida aberta pode impedir que a Home atualize indicadores como Wi-Fi e MQTT. Em **Desktop**, a conexão fica aberta para usar o computador como interface de mensagens. Use **Desconectar** em Mensagens para liberá-la. A opção **Leitura pontual** libera a porta ao terminar cada operação. Uma nova conexão pode levar cerca de 40 segundos; o modo desktop evita repetir essa espera entre operações. Se houver uma queda, o app mostra o estado desconectado e exige uma reconexão explícita; não repete mensagens automaticamente. O horário da leitura e os valores das configurações não garantem telemetria recente.
+A [Meshtastic UI compartilha a Client API com os clientes externos](https://meshtastic.org/docs/configuration/device-uis/meshtasticui/#accessing-the-client-api). Uma conexão serial mantida aberta pode impedir que a Home atualize indicadores como Wi-Fi e MQTT. A conexão fica aberta para usar o computador como interface de mensagens. Use **Desconectar** em Mensagens para liberá-la. Uma nova conexão pode levar cerca de 40 segundos; manter a conexão evita repetir essa espera entre operações. Se houver uma queda, o app mostra o estado desconectado e exige uma reconexão explícita; não repete mensagens automaticamente. O horário da leitura e os valores das configurações não garantem telemetria recente.
 
 - **GPS:** use `gps_mode`. O antigo `gps_enabled` é obsoleto e seu valor não indica o estado atual do GPS. GPS habilitado não garante coordenadas: é necessário obter uma posição dos satélites.
 - **Campos obsoletos:** o formulário os apresenta somente em “Campos obsoletos · somente leitura”. Alterações pelo JSON/API são rejeitadas; omitir esses campos preserva o valor existente, inclusive em estruturas internas. A indicação vem do protocolo instalado, não de uma detecção completa das capacidades de cada firmware.

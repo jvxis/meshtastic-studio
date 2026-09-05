@@ -1,6 +1,15 @@
 # Validação inicial — 5 de setembro de 2026
 
 
+## Atualização: conexão simples e sincronização de sessão
+
+- Removida a escolha Desktop/Leitura pontual da interface. Conectar mantém a conexão e inicia a recepção; Desconectar a libera.
+- O indicador de escrita usa a permissão do servidor, mesmo sem rádio selecionado. Os controles de envio e aplicação continuam exigindo dispositivo e autorização efetiva.
+- Respostas de consultas iniciadas antes de uma troca de sessão são descartadas. Mudanças reais de sessão atualizam estado e token automaticamente, preservando o texto digitado e sem repetir operações.
+- Navegador aprovado em desktop e celular, incluindo regressões para permissão de escrita antes da conexão, resposta atrasada após conectar, atualização automática de sessão com preservação do rascunho, ausência da escolha de modo e os fluxos anteriores de mensagens/configurações.
+- Servidor local conferido com escrita habilitada. Nenhuma conexão ao rádio, mensagem real ou alteração de configuração foi feita nesta validação.
+
+
 ## Atualização: conectar e receber em uma única conexão
 
 - **123 testes de backend aprovados.** Em Desktop, a conexão inicial é transferida à recepção contínua sem fechar a porta nem repetir o handshake. Testes em transportes USB e TCP simulados verificam uma única abertura para receber, enviar a canais/destinatários e consultar configurações.

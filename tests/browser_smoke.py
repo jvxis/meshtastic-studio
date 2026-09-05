@@ -39,7 +39,62 @@ def run():
             errors = []
             page.on("pageerror", lambda exc: errors.append(str(exc)))
             page.on("console", lambda msg: errors.append(msg.text) if msg.type == "error" else None)
+            # A session response must advertise the server permission even
+            # before selecting hardware. These are HTTP mocks, never radio I/O.
+            def enabled_session(route):
+                result = route.fetch().json()
+                result['state']['server_writes_enabled'] = True
+                assert result['state']['writes_enabled'] is False
+                route.fulfill(status=200, json=result)
+            page.route('**/api/session', enabled_session)
             page.goto(url)
+            expect(page.locator('.top-status')).to_contain_text('Gravação habilitada')
+            expect(page.locator('#app .status-strip')).to_contain_text('Gravação habilitada')
+            expect(page.locator('#connection-mode')).to_have_count(0)
+            page.unroute('**/api/session', enabled_session)
+            page.reload()
+            expect(page.locator('.top-status')).to_contain_text('Somente leitura')
+
+            # Finish an old poll after our own connect changes the epoch.
+            held = []
+            old_messages = httpx.get(url+'/api/messages').json()
+            page.route('**/api/messages', lambda route: held.append(route))
+            for _ in range(30):
+                if held: break
+                page.wait_for_timeout(100)
+            assert held
+            page.locator('[data-action="demo"]').click()
+            expect(page.locator('.device-name')).to_have_text('Estação de demonstração')
+            held[0].fulfill(status=200, json=old_messages)
+            page.unroute('**/api/messages')
+            expect(page.locator('#toast')).not_to_contain_text('A sessão mudou')
+
+            # Another client changes the selected session: refresh state and
+            # token automatically, preserving the typed message without sending.
+            page.locator('nav [data-page="messages"]').click()
+            page.locator('#chat-text').fill('Rascunho preservado após atualização de sessão')
+            token = httpx.get(url+'/api/session').json()['token']
+            headers = {'x-mesh-token': token}
+            httpx.post(url+'/api/disconnect', json={}, headers=headers).raise_for_status()
+            httpx.post(url+'/api/demo', json={}, headers=headers).raise_for_status()
+            # Observing a second session fetch proves the epoch was reconciled.
+            refreshed = []
+            def capture_session(route):
+                refreshed.append(True)
+                route.continue_()
+            page.route('**/api/session', capture_session)
+            for _ in range(40):
+                if refreshed: break
+                page.wait_for_timeout(100)
+            assert refreshed
+            expect(page.locator('#chat-text')).to_have_value('Rascunho preservado após atualização de sessão')
+            expect(page.locator('#toast')).not_to_contain_text('A sessão mudou')
+            assert not httpx.get(url+'/api/messages').json()['messages']
+            page.unroute('**/api/session', capture_session)
+            page.locator('#chat-text').fill('')
+            page.locator('nav [data-page="overview"]').click()
+            page.locator('[data-action="disconnect"]').click()
+            expect(page.locator('#port-select')).to_be_visible()
             expect(page.locator('#port-select')).to_be_visible()
             page.locator('#connection-type').select_option('tcp')
             expect(page.locator('#tcp-host')).to_be_visible()
@@ -67,10 +122,7 @@ def run():
             page.locator('[data-action="connect"]').click()
             expect(page.locator('#toast')).to_contain_text('Rádio conectado')
             assert submitted == [{'transport': 'tcp', 'host': '192.0.2.10', 'tcp_port': 4404, 'mode': 'desktop'}]
-            page.locator('#connection-mode').select_option('brief')
-            page.locator('[data-action="connect"]').click()
-            expect(page.locator('#toast')).to_contain_text('Leitura salva')
-            assert submitted[-1]['mode'] == 'brief'
+            expect(page.locator('#connection-mode')).to_have_count(0)
             page.unroute('**/api/connect', capture_connect)
             page.locator('[data-action="demo"]').click()
             expect(page.locator('[data-action="disconnect"]')).to_be_visible()

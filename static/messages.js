@@ -1,5 +1,5 @@
-export function createChat({api, esc, icon, getState, task, notify, refreshState, isBusy}) {
-  let data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false}, target='', timer, sending=false, viewBusy=false, generation=0;
+export function createChat({api, esc, icon, getState, task, notify, refreshState, isBusy, syncSession}) {
+  let data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false}, target='', timer, sending=false, viewBusy=false, generation=0, polling=false;
   const drafts=new Map();
   const failedMessages=new Map();
   const channelSelections=new Map();
@@ -38,9 +38,19 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
     if($('#chat-connection-error')){$('#chat-connection-error').hidden=!data.listen_error;$('#chat-connection-detail').textContent=data.listen_error||'';}
   }
   async function poll(){
+    if(polling)return;
+    polling=true;
+    const epoch=getState().epoch, version=generation;
     try{
       const next=await api('messages');
-      if(next.epoch!==getState().epoch){if(isBusy())return;pausePolling();notify('A sessão mudou. Recarregue a página antes de continuar.',true);return;}
+      // Ignore responses started before our own connect/disconnect completed.
+      if(epoch!==getState().epoch||version!==generation)return;
+      if(next.epoch!==epoch){
+        if(isBusy()||sending)return;
+        data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false};
+        await syncSession();
+        return;
+      }
       const changed=next.active_phase!==data.active_phase;
       data=next;
       if(changed){getState().active_phase=next.active_phase;if(!activePending())await refreshState();if(!sending)await task(async()=>{});}
@@ -51,6 +61,7 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
       if($('#chat-receive-status'))$('#chat-receive-status').textContent=receiveStatus();
       updateReceptionButtons();updateCount();
     }catch{/* A failed local poll must never trigger a device reconnection. */}
+    finally{polling=false;}
   }
   function watch(){if(!timer){timer=setInterval(poll,1500);poll();}}
   function pausePolling(){clearInterval(timer);timer=null;}

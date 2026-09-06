@@ -236,7 +236,7 @@ def run():
             page.locator('#chat-text').fill('')
             page.locator('#chat-target').select_option('direct:!de000003')
             expect(page.locator('#chat-feed')).to_contain_text('Mensagem direta de demonstração')
-            page.locator('#chat-channel').select_option('1')
+            expect(page.locator('#chat-channel')).to_have_count(0)
             page.locator('#chat-text').fill('Olá, mensagem direta!')
             page.locator('#chat-text').press('Shift+Enter')
             page.locator('#chat-text').press_sequentially('Segunda linha')
@@ -244,7 +244,10 @@ def run():
             page.locator('#chat-text').press('Enter')
             expect(page.locator('#review-dialog')).not_to_be_visible()
             expect(page.locator('#chat-feed')).to_contain_text('Olá, mensagem direta!')
-            expect(page.locator('#chat-channel')).to_have_value('1')
+            sent = httpx.get(url+'/api/messages').json()['messages']
+            direct = next(m for m in sent if m['text'].startswith('Olá, mensagem direta!'))
+            assert direct['destination'] == '!de000003' and direct['channel'] == 0
+            assert direct['conversation'] == 'direct:!de000003'
             page.screenshot(path=str(ARTIFACTS / 'demo-messages.png'), full_page=True, animations='disabled')
             page.set_viewport_size({'width': 390, 'height': 844})
             assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
@@ -366,7 +369,7 @@ def run():
         assert state["device"]["write_packets"] == 0
         assert state["device"]["simulated_writes"] == 1
         assert len(messages) == 8
-        assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 1
+        assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 0
         print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping", "direct send without modal", "Enter and Shift+Enter", "draft preservation during pending send", "duplicate submission prevention", "failed send text recovery", "lost response without automatic retry", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
         if proc.poll() is None:

@@ -20,7 +20,7 @@ def run():
         port = sock.getsockname()[1]
     url = f"http://127.0.0.1:{port}"
     env = {**os.environ, "MESH_ALLOW_WRITES": "0"}
-    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "server.app:app", "--host", "127.0.0.1", "--port", str(port), "--no-access-log"],
+    proc = subprocess.Popen([sys.executable, "-m", "server.run", "--port", str(port)],
                             cwd=ROOT, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
     try:
@@ -336,18 +336,41 @@ def run():
             expect(page.locator('[data-field="hop_limit"]')).to_have_value("4")
             assert not page.evaluate("document.documentElement.scrollWidth > innerWidth")
             page.screenshot(path=str(ARTIFACTS / "demo-mobile-editor.png"), full_page=True, animations="disabled")
+            # Exercise shutdown through the mobile UI, including cancel with
+            # an unsent draft. The managed test server must actually exit.
+            state = httpx.get(url + '/api/state').json()
+            messages = httpx.get(url + '/api/messages').json()['messages']
+            page.locator('[data-action="menu"]').click()
+            page.locator('nav [data-page="messages"]').click()
+            page.locator('#chat-text').fill('Rascunho antes de encerrar')
+            page.locator('[data-action="menu"]').click()
+            dialogs = []
+            def cancel_close(dialog):
+                dialogs.append(dialog.message)
+                dialog.dismiss()
+            page.on('dialog', cancel_close)
+            page.locator('[data-action="shutdown"]').click()
+            assert dialogs
+            expect(page.locator('#chat-text')).to_have_value('Rascunho antes de encerrar')
+            assert httpx.get(url+'/api/health').json()['stopping'] is False
+            page.remove_listener('dialog', cancel_close)
+            page.on('dialog', lambda dialog: dialog.accept())
+            page.locator('[data-action="shutdown"]').click()
+            expect(page.locator('h1')).to_have_text('App encerrado')
+            page.screenshot(path=str(ARTIFACTS/'app-closed-mobile.png'), full_page=True)
+            proc.wait(timeout=10)
+            assert proc.returncode == 0
             browser.close()
             assert not errors, errors
-        state = httpx.get(url + "/api/state").json()
         assert state["demo"] and not state["server_writes_enabled"]
         assert state["device"]["write_packets"] == 0
         assert state["device"]["simulated_writes"] == 1
-        messages = httpx.get(url + '/api/messages').json()['messages']
         assert len(messages) == 8
         assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 1
         print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping", "direct send without modal", "Enter and Shift+Enter", "draft preservation during pending send", "duplicate submission prevention", "failed send text recovery", "lost response without automatic retry", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
-        proc.terminate()
+        if proc.poll() is None:
+            proc.terminate()
         proc.wait(timeout=10)
 
 

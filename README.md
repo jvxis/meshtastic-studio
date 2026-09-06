@@ -89,6 +89,30 @@ Nas próximas utilizações, abra o PowerShell na pasta `meshtastic-studio` e ex
 .\start.ps1
 ```
 
+## Atalho no desktop e encerramento pelo app
+
+Depois de instalar, execute na pasta do projeto para criar o atalho **Mesh Studio**:
+
+```powershell
+.\create-shortcut.ps1 -AllowWrites
+```
+
+Se o Windows bloquear o script, este comando usa `RemoteSigned` somente no processo que cria o atalho, sem mudar a política persistente do sistema:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\create-shortcut.ps1 -AllowWrites
+```
+
+O atalho abre a página no navegador. Se o servidor não estiver rodando, inicia em segundo plano na porta **8765**, sem janela de terminal. Se já estiver rodando, apenas abre a página, sem iniciar outro processo. Dois cliques simultâneos também compartilham o mesmo servidor. O atalho não conecta o rádio automaticamente.
+
+`-AllowWrites` autoriza mensagens e configurações quando o atalho inicia um novo servidor. Omita essa opção para criar um atalho de somente leitura. Abrir um servidor já iniciado preserva sua permissão atual. Se outra aplicação ocupar a porta, o atalho informa o problema e não encerra processos. Para mudar de porta, use `-Port` ao criar o atalho. Se mover a pasta do projeto, crie o atalho novamente.
+
+No menu lateral, clique em **Encerrar app** para liberar USB/TCP e parar o servidor. O app espera uma comunicação em andamento terminar antes de fechar a conexão. A página informa quando você pode fechar a aba; o navegador pode impedir que uma página feche sua própria aba automaticamente. **Fechar apenas a aba não para o servidor nem libera a COM.**
+
+Encerrar apaga o histórico da sessão e os rascunhos em memória. Se houver rascunhos ou envio em andamento, a interface pede confirmação antes de encerrar. As configurações já salvas no rádio permanecem. Para apenas liberar o rádio e manter o servidor/histórico, use **Desconectar** em Mensagens.
+
+O encerramento pelo app funciona com o atalho, `start.ps1` e `python -m server.run`. Instâncias antigas iniciadas diretamente com `uvicorn` precisam ser encerradas pelo terminal e iniciadas pelo novo comando. A inicialização pelo atalho registra diagnósticos locais em `artifacts/launcher-server-8765.log`, pasta ignorada pelo Git.
+
 ## Instalação manual no Windows
 
 Após baixar o projeto e entrar em sua pasta, execute estes comandos no PowerShell:
@@ -97,7 +121,7 @@ Após baixar o projeto e entrar em sua pasta, execute estes comandos no PowerShe
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:MESH_ALLOW_WRITES = "0"
-.\.venv\Scripts\python.exe -m uvicorn server.app:app --host 127.0.0.1 --port 8765 --no-access-log
+.\.venv\Scripts\python.exe -m server.run --port 8765
 ```
 
 Não é necessário ativar o ambiente virtual. Abra **http://127.0.0.1:8765**, mantenha o terminal aberto e siga os passos de conexão descritos acima.
@@ -111,7 +135,7 @@ git clone https://github.com/jvxis/meshtastic-studio.git
 cd meshtastic-studio
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-MESH_ALLOW_WRITES=0 .venv/bin/python -m uvicorn server.app:app --host 127.0.0.1 --port 8765 --no-access-log
+MESH_ALLOW_WRITES=0 .venv/bin/python -m server.run --port 8765
 ```
 
 Abra **http://127.0.0.1:8765**. Os nomes das portas e suas permissões dependem do sistema operacional. No Linux, o suporte a `venv` pode precisar ser instalado pelo gerenciador de pacotes da distribuição. Não é necessário executar o app como administrador/root.

@@ -1,6 +1,15 @@
 # Validação inicial — 5 de setembro de 2026
 
 
+## Atualização: atalho do Windows e encerramento pelo app
+
+- Adicionado `launcher.py` e instalador de atalho `create-shortcut.ps1`. O atalho inicia o servidor sem terminal quando necessário, reutiliza o servidor existente e abre a página. Um bloqueio de processo impede inicializações duplicadas por cliques simultâneos; não há encerramento de outros processos por PID ou porta.
+- O servidor gerenciado (`python -m server.run`) aceita encerramento pela API local com token e verificação de origem. Primeiro espera a comunicação em andamento e libera USB/TCP; depois encerra o servidor. Novas operações ficam bloqueadas durante esse processo. Falhas de liberação não são apresentadas como sucesso.
+- **132 testes de backend aprovados no Windows**, incluindo encerramento durante recepção em USB/TCP simulados, espera por operação em andamento, autenticação, repetição da solicitação, falha de liberação, inicialização concorrente, reutilização e saída efetiva do processo. A inicialização por `pythonw.exe` foi verificada separadamente, sem hardware.
+- Navegador aprovado em desktop e celular, incluindo cancelamento do encerramento com rascunho, preservação do texto ao cancelar, tela final e saída real do servidor de teste.
+- Atalho instalado no desktop local com escrita habilitada. O lançador reutilizou a instância da porta 8765. A atualização preservou o histórico em memória e retomou a conexão física/escuta, sem mensagens enviadas nem gravações de configuração durante a validação. O encerramento final da sessão real ficou disponível para o usuário.
+
+
 ## Correção: abertura da interface após atualização de GPS
 
 - Reproduzido o erro de serialização `google._upb._message.Descriptor` usando um pacote de posição processado pelo callback real da biblioteca Meshtastic, sem abrir transporte físico. O erro afetava `/api/state` e `/api/session`, tanto na conexão ativa quanto na leitura em memória.

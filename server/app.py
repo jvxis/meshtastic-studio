@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from typing import Literal
 from pydantic import BaseModel, Field, model_validator
@@ -78,6 +79,7 @@ class Manager(Messaging):
         self.epoch = secrets.token_hex(16)
         self.previews = {}
         self.events = []
+        self.shutting_down = False
         self.init_messaging()
 
     def log(self, action, detail, level="info"):
@@ -86,6 +88,8 @@ class Manager(Messaging):
         self.events = self.events[:100]
 
     def require(self):
+        if self.shutting_down:
+            raise HTTPException(503, "O app está encerrando.")
         if not self.device or (not isinstance(self.device, DeviceSession) and not self.device.connected()):
             raise HTTPException(409, "Conecte um dispositivo antes de continuar.")
         return self.device
@@ -154,6 +158,8 @@ class Manager(Messaging):
 
     def connect(self, port=None, demo=False, *, host=None, tcp_port=4403, mode='brief'):
         with self.lock:
+            if self.shutting_down:
+                raise HTTPException(503, "O app está encerrando.")
             if self.device or self.disconnecting:
                 raise HTTPException(409, "Desconecte a sessão atual antes de abrir outra.")
             if not demo and not host and port not in {p.device for p in list_ports.comports()}:
@@ -275,9 +281,10 @@ class Manager(Messaging):
             return self.state()
 
 
-def create_app(manager=None):
+def create_app(manager=None, shutdown_callback=None):
     manager = manager or Manager(allow_writes=os.getenv("MESH_ALLOW_WRITES", "0") == "1")
     csrf_token = secrets.token_urlsafe(32)
+    shutdown_lock = threading.Lock()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -334,6 +341,33 @@ def create_app(manager=None):
     @app.get("/api/session")
     def session():
         return {"token": csrf_token, "schema": public_schema(), "state": manager.state()}
+
+    @app.get("/api/health")
+    def health():
+        return {"app": "mesh-studio", "lifecycle": 1,
+                "shutdown_available": shutdown_callback is not None,
+                "stopping": manager.shutting_down}
+
+    @app.post("/api/shutdown")
+    def shutdown():
+        if shutdown_callback is None:
+            raise HTTPException(409, "Inicie o servidor pelo atalho ou por python -m server.run para encerrá-lo pelo app.")
+        if not shutdown_lock.acquire(blocking=False):
+            raise HTTPException(409, "O app já está encerrando. Aguarde.")
+        try:
+            if manager.shutting_down:
+                return {"stopping": True, "radio_released": True}
+            manager.shutting_down = True
+            # Wait for pending communication and close the transport before
+            # acknowledging shutdown. Never terminate another process.
+            manager.disconnect()
+        except Exception:
+            manager.shutting_down = False
+            raise
+        finally:
+            shutdown_lock.release()
+        return JSONResponse({"stopping": True, "radio_released": True},
+                            background=BackgroundTask(shutdown_callback))
 
     @app.get("/api/ports")
     def ports():

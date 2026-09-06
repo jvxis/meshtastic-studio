@@ -317,3 +317,17 @@ def test_cancel_desktop_initial_handshake_releases_without_starting_receiver(act
     assert responses[0].status_code == 409
     assert m.device is None and m.active_thread is None
     assert len(opened) == 1 and opened[0].close_count == 1
+
+
+def test_managed_shutdown_releases_active_serial_or_tcp(active_radio):
+    c, m, _, opened, _ = active_radio
+    connect_desktop(c, m, opened).raise_for_status()
+    stopped = []
+    def on_shutdown():
+        assert opened[0].close_count == 1
+        assert m.active_thread is None and m.device is None
+        stopped.append(True)
+    with TestClient(create_app(m, shutdown_callback=on_shutdown), base_url='http://127.0.0.1') as managed:
+        managed.headers['x-mesh-token'] = managed.get('/api/session').json()['token']
+        managed.post('/api/shutdown', json={}).raise_for_status()
+    assert stopped == [True] and len(opened) == 1

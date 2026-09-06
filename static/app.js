@@ -53,11 +53,12 @@ const hints = {gps_mode:'Controla o GPS. ENABLED permite buscar satélites; coor
   public_key:'Formato Base64. A chave pública não é uma senha.',
 };
 let connectionType = 'serial', connectionHost = '', connectionPort = '4403', selectedPort = '';
+let closing = '';
 let csrf = '', schema = [], state = {session_active:false,connected:false,sections:{},nodes:[],events:[]}, ports = [], page = 'overview', selected = '', drafts = {}, busy = false, applying = false, jsonMode = false, fieldSearch = '', nodeSearch = '', errors = {}, preview = null, toastTimer;
 const sectionValue = key => state.sections[key]?.values || {};
 const valueAt = (obj, path) => path.split('.').reduce((v,k) => v?.[k], obj);
 function setAt(obj, path, value) { const keys = path.split('.'); let dest = obj; keys.slice(0,-1).forEach(k => { if (!dest[k] || typeof dest[k] !== 'object') dest[k] = {}; dest = dest[k]; }); dest[keys.at(-1)] = value; }
-function notify(message, error=false) { const el = $('#toast'); el.textContent = message; el.className = `visible${error?' error':''}`; clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.className='', error?11000:5000); }
+function notify(message, error=false) { if(closing)return; const el = $('#toast'); el.textContent = message; el.className = `visible${error?' error':''}`; clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.className='', error?11000:5000); }
 async function api(path, body) { const response=await fetch(`/api/${path}`, {method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json','X-Mesh-Token':csrf},body:body===undefined?undefined:JSON.stringify(body)}); const result=await response.json(); if(!response.ok){const error=new Error(typeof result.detail==='string'?result.detail:'Os dados enviados não são válidos.');error.status=response.status;throw error;} return result; }
 async function task(action, message) { if(busy)return; busy=true; render(); try { await action(); if(message)notify(message); } catch(e){ notify(e.message,true); } finally {busy=false;render();} }
 function transportLabel(){return state.device?.transport==='tcp'?'Rede / TCP':'USB / serial';}
@@ -77,8 +78,13 @@ if(state.session_active&&!state.demo&&state.connection_mode==='desktop')return '
 if(state.session_active&&!state.demo&&(busy||applying))return '<div class="status-strip"><b>Operação em andamento.</b> A conexão será encerrada ao concluir. Durante a recepção, use Parar recepção para encerrar antes.</div>';return state.session_active&&!state.demo?`<div class="status-strip">${icon('usb')}<span><b>Conexão encerrada automaticamente.</b> Você está vendo a última leitura${state.observed_at?' de '+esc(new Date(state.observed_at).toLocaleString('pt-BR')):''}. Consultas e aplicações reconectam por alguns instantes; durante esse período a tela do rádio pode pausar as atualizações.</span></div>`:'';}
 function statusStrip(){return snapshotNotice()+ `<div class="status-strip ${state.demo?'demo':''}">${icon(state.demo?'code':'shield')}<span>${state.demo?'<b>Ambiente de demonstração.</b> Todos os dados são fictícios; as alterações são simuladas.':writesAllowed()?'<b>Gravação habilitada.</b> Cada seção exige revisão e confirmação antes do envio.':'<b>Você está em modo de leitura.</b> Explore e prepare rascunhos. A gravação no dispositivo está bloqueada.'}</span><span class="end">${state.device?`${state.device.write_packets} gravações de configuração`:'ACESSO LOCAL'}</span></div>`;}
 function render(){
+  if(closing){
+    $('#app').innerHTML=`<div class="boot"><h1>${closing==='done'?'App encerrado':'Encerrando o app…'}</h1><p style="margin-top:15px">${closing==='done'?'O rádio foi liberado e o servidor está encerrando. Você pode fechar esta aba.':'Aguardando a comunicação atual terminar para liberar o rádio.'}</p><p class="muted" style="margin-top:12px">Para abrir novamente, use o atalho Mesh Studio na área de trabalho.</p></div>`;
+    return;
+  }
+
   const current=state.device;
-  $('#app').innerHTML=`${busy?'<div class="busy-overlay" role="progressbar" aria-label="Operação em andamento"></div>':''}<div class="layout"><aside class="sidebar"><div class="brand"><span class="logo">${icon('mesh')}</span>Mesh Studio</div><div class="brand-sub">LOCAL CONTROL</div>${navGroups.map(([label,items])=>`<div class="nav-label">${label}</div><nav class="nav" aria-label="${label}">${items.map(([id,ic])=>`<button data-page="${id}" class="${page===id?'active':''}" ${page===id?'aria-current="page"':''}>${icon(ic)}${titles[id]}${id==='drafts'&&dirtyKeys().length?`<span class="badge-number">${dirtyKeys().length}</span>`:''}</button>`).join('')}</nav>`).join('')}<div class="sidebar-bottom"><div class="device-mini"><span class="eyebrow"><i class="dot ${state.connected?'':'off'}"></i>${state.demo?'SIMULADOR':state.session_active?(state.active_phase==='active'?'ESCUTA ATIVA':busy?'OPERAÇÃO EM ANDAMENTO':'DESCONECTADO · LEITURA SALVA'):'SEM SESSÃO'}</span><div class="mini-title">${esc(current?.name || 'Seu próximo ponto na rede')}</div><span class="mono tiny muted">${esc(current?`${current.id} · ${current.port}`:'USB / serial ou Rede / TCP')}</span></div><div class="footer-note">${icon('lock')}Dados locais. Sem nuvem.</div></div></aside><main class="main"><header class="topbar"><div class="breadcrumb"><button class="btn ghost mobile-menu" data-action="menu" aria-label="Abrir menu">${icon('menu')}</button><span>Workspace</span><span>/</span><b>${titles[page]}</b></div><div class="top-status"><span class="local-label muted"><i class="dot"></i>localhost</span>${modePill()}</div></header><div class="content">${page==='overview'?overview():page==='messages'?heading('Mensagens','Converse nos canais e diretamente com os nós da rede.')+chat.render(state,busy):page==='nodes'?nodesPage():page==='channels'&&!selected?channelsPage():page==='drafts'?draftsPage():settingsPage()}<footer class="page-foot"><span>Mesh Studio <span class="muted">/</span> Feito para explorar sua rede.</span><span>${state.demo?'DADOS DE DEMONSTRAÇÃO':state.session_active?`Última leitura · ${esc(current.port)} · ${state.active_phase==='active'?'escuta ativa':busy?'operação em andamento':'conexão encerrada'}`:'Conexão direta com o seu Meshtastic'}</span></footer></div></main></div>`;
+  $('#app').innerHTML=`${busy?'<div class="busy-overlay" role="progressbar" aria-label="Operação em andamento"></div>':''}<div class="layout"><aside class="sidebar"><div class="brand"><span class="logo">${icon('mesh')}</span>Mesh Studio</div><div class="brand-sub">LOCAL CONTROL</div>${navGroups.map(([label,items])=>`<div class="nav-label">${label}</div><nav class="nav" aria-label="${label}">${items.map(([id,ic])=>`<button data-page="${id}" class="${page===id?'active':''}" ${page===id?'aria-current="page"':''}>${icon(ic)}${titles[id]}${id==='drafts'&&dirtyKeys().length?`<span class="badge-number">${dirtyKeys().length}</span>`:''}</button>`).join('')}</nav>`).join('')}<div class="sidebar-bottom"><div class="device-mini"><span class="eyebrow"><i class="dot ${state.connected?'':'off'}"></i>${state.demo?'SIMULADOR':state.session_active?(state.active_phase==='active'?'ESCUTA ATIVA':busy?'OPERAÇÃO EM ANDAMENTO':'DESCONECTADO · LEITURA SALVA'):'SEM SESSÃO'}</span><div class="mini-title">${esc(current?.name || 'Seu próximo ponto na rede')}</div><span class="mono tiny muted">${esc(current?`${current.id} · ${current.port}`:'USB / serial ou Rede / TCP')}</span></div><div class="footer-note">${icon('lock')}Dados locais. Sem nuvem.</div><button class="btn ghost" data-action="shutdown" title="Libera o rádio, encerra o servidor e apaga o histórico desta sessão" ${busy||applying?'disabled':''}>Encerrar app</button></div></aside><main class="main"><header class="topbar"><div class="breadcrumb"><button class="btn ghost mobile-menu" data-action="menu" aria-label="Abrir menu">${icon('menu')}</button><span>Workspace</span><span>/</span><b>${titles[page]}</b></div><div class="top-status"><span class="local-label muted"><i class="dot"></i>localhost</span>${modePill()}</div></header><div class="content">${page==='overview'?overview():page==='messages'?heading('Mensagens','Converse nos canais e diretamente com os nós da rede.')+chat.render(state,busy):page==='nodes'?nodesPage():page==='channels'&&!selected?channelsPage():page==='drafts'?draftsPage():settingsPage()}<footer class="page-foot"><span>Mesh Studio <span class="muted">/</span> Feito para explorar sua rede.</span><span>${state.demo?'DADOS DE DEMONSTRAÇÃO':state.session_active?`Última leitura · ${esc(current.port)} · ${state.active_phase==='active'?'escuta ativa':busy?'operação em andamento':'conexão encerrada'}`:'Conexão direta com o seu Meshtastic'}</span></footer></div></main></div>`;
   bind();
 }
 function overview(){
@@ -155,7 +161,17 @@ function bind(){
   if($('#field-search'))$('#field-search').oninput=e=>{fieldSearch=e.target.value;const pos=e.target.selectionStart;render();$('#field-search').focus();$('#field-search').setSelectionRange(pos,pos);};
   if($('#node-search'))$('#node-search').oninput=e=>{nodeSearch=e.target.value;const pos=e.target.selectionStart;render();$('#node-search').focus();$('#node-search').setSelectionRange(pos,pos);};
 }
+async function shutdownApp(){
+  if(busy||applying||closing)return;
+  if((dirtyKeys().length||chat.hasDrafts())&&!window.confirm('Há rascunhos ou um envio em andamento. Encerrar o app após a comunicação atual? Os rascunhos e o histórico desta sessão serão apagados.'))return;
+  closing='pending';clearTimeout(toastTimer);$('#toast').className='';chat.pausePolling();render();
+  try{
+    await api('shutdown',{});
+    drafts={};errors={};chat.reset();closing='done';render();
+  }catch(error){closing='';render();notify(error.message,true);}
+}
 const actions={
+  shutdown:shutdownApp,
   menu:()=>$('.sidebar').classList.toggle('open'), overview:()=>go('overview'),
   ports:()=>task(async()=>{ports=await api('ports');}),
   connect:()=>{
@@ -204,11 +220,11 @@ function reviewDialog(){
 async function syncSession(){
   const epoch=state.epoch;
   const session=await api('session');
-  if(busy||epoch!==state.epoch)return;
+  if(busy||closing||epoch!==state.epoch)return;
   csrf=session.token;schema=session.schema;state=session.state;preview=null;
   if(!applying)$('#review-dialog').close();
   render();
 }
-const chat=createChat({syncSession,api,esc,icon,isBusy:()=>busy,getState:()=>state,task,notify,refreshState:async()=>{state=await api('state');}});
+const chat=createChat({syncSession,api,esc,icon,isBusy:()=>busy||Boolean(closing),getState:()=>state,task,notify,refreshState:async()=>{state=await api('state');}});
 window.addEventListener('beforeunload',event=>{if(dirtyKeys().length||applying||chat.hasDrafts()){event.preventDefault();event.returnValue='';}});
 try{const session=await api('session');csrf=session.token;schema=session.schema;state=session.state;ports=await api('ports');render();}catch(e){$('#app').innerHTML=`<div class="boot"><h1>Não foi possível iniciar</h1><p style="margin-top:15px">${esc(e.message)}</p><p class="muted" style="margin-top:12px">Verifique se o servidor local está em execução e recarregue a página.</p></div>`;}

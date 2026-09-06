@@ -32,7 +32,7 @@ try {
     $env:MESH_ALLOW_WRITES = if ($AllowWrites) { '1' } else { '0' }
     Write-Host "Mesh Studio: http://127.0.0.1:$Port"
     Write-Host $(if ($AllowWrites) { 'Gravação habilitada. Cada aplicação exige revisão na interface.' } else { 'Somente leitura. Gravação real bloqueada no servidor.' })
-    & $meshPython -m uvicorn server.app:app --host 127.0.0.1 --port $Port --no-access-log
+    & $meshPython -m server.run --port $Port
 } finally {
     Pop-Location
 }

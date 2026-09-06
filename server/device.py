@@ -21,6 +21,15 @@ WRITES = {"set_owner", "set_channel", "set_config", "set_module_config",
           "set_canned_message_module_messages", "set_ringtone_message", "store_ui_config"}
 
 
+def public_node_fields(value):
+    """Copy decoded node data without the library's internal raw protobufs."""
+    if isinstance(value, dict):
+        return {key: public_node_fields(item) for key, item in value.items() if key != 'raw'}
+    if isinstance(value, list):
+        return [public_node_fields(item) for item in value]
+    return copy.deepcopy(value)
+
+
 def signature(command):
     clean = admin_pb2.AdminMessage()
     clean.CopyFrom(command)
@@ -343,8 +352,8 @@ class RealDevice:
                 "transport": "tcp" if self.host else "serial", "host": self.host,
                 "tcp_port": self.tcp_port if self.host else None,
                 "metadata": self.metadata,
-                "metrics": copy.deepcopy(local.get("deviceMetrics", {})),
-                "position": copy.deepcopy(local.get("position", {})),
+                "metrics": public_node_fields(local.get("deviceMetrics", {})),
+                "position": public_node_fields(local.get("position", {})),
                 "write_packets": self.iface.write_packets, "read_packets": self.iface.read_packets,
                 "message_packets": self.iface.message_packets}
 

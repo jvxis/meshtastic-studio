@@ -1,6 +1,14 @@
 # Validação inicial — 5 de setembro de 2026
 
 
+## Correção: abertura da interface após atualização de GPS
+
+- Reproduzido o erro de serialização `google._upb._message.Descriptor` usando um pacote de posição processado pelo callback real da biblioteca Meshtastic, sem abrir transporte físico. O erro afetava `/api/state` e `/api/session`, tanto na conexão ativa quanto na leitura em memória.
+- O resumo público agora exclui os objetos internos `raw` dos dados de posição e telemetria. Coordenadas, altitude e métricas permanecem disponíveis, e os objetos usados pela biblioteca não são modificados.
+- **125 testes de backend aprovados**, incluindo os dois casos de regressão acima. Teste completo de navegador aprovado em desktop e celular.
+- Servidor local reiniciado na porta 8765, com histórico transferido somente em memória e escrita habilitada. Conexão física e escuta retomadas; inicialização retornou HTTP 200 com posição disponível, zero mensagens enviadas e zero gravações de configuração nesta verificação. Os contadores de comunicação passaram a representar a nova execução do servidor.
+
+
 ## Atualização: conexão simples e sincronização de sessão
 
 - Removida a escolha Desktop/Leitura pontual da interface. Conectar mantém a conexão e inicia a recepção; Desconectar a libera.

@@ -142,6 +142,7 @@ Na instalação manual, depois de `git pull --ff-only`, execute novamente o coma
 | Windows reconhece a COM, mas não consegue inicializar USB/Serial | Reconecte o cabo de dados; se persistir, desligue e ligue o rádio com o cabo conectado. O app diferencia essa falha de porta ocupada e de falhas TCP. |
 | Porta serial ocupada | Desconecte outros clientes ou monitores seriais que estejam usando o equipamento. |
 | TCP recusado ou sem resposta | Confira IP, porta 4403, acesso pela rede e suporte do firmware; na MUI do T-Deck examinada, o servidor TCP fica desativado. |
+| Erro `Descriptor` ao abrir a página após atualização de GPS | Atualize o projeto e reinicie o servidor. A correção mantém apenas os dados públicos de posição na resposta da interface. |
 | Consulta sem resposta | Verifique a conexão e o suporte do firmware. O app repete uma consulta de leitura no máximo uma vez. |
 | Aplicação de rascunho bloqueada | Esse é o comportamento padrão. Consulte a seção seguinte para habilitar gravações em uma sessão futura. |
 

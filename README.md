@@ -1,8 +1,8 @@
 # Mesh Studio
 
-Web app local, em português, para consultar e editar configurações de um Meshtastic conectado por USB/serial ou pela rede local via TCP. A interface tem painel do dispositivo, nós conhecidos, formulários gerados pelo protocolo, editor JSON, revisão de rascunhos e mensagens de canais e diretas.
+Web app local, em português, para consultar e editar configurações de um Meshtastic conectado por USB/serial ou pela rede local via TCP. A interface tem painel do dispositivo, nós conhecidos, formulários gerados pelo protocolo, editor JSON, rascunhos de configuração e mensagens de canais e diretas.
 
-**A inicialização padrão bloqueia gravações de configuração e envio de mensagens reais no servidor e na camada de comunicação.** É possível editar e revisar rascunhos sem enviá-los ao rádio. O simulador permite testar uma aplicação completa sem conectar hardware.
+**A inicialização padrão bloqueia gravações de configuração e envio de mensagens reais no servidor e na camada de comunicação.** É possível editar rascunhos sem enviá-los ao rádio. O simulador permite testar uma aplicação completa sem conectar hardware.
 
 ![Painel do Mesh Studio com dados fictícios de demonstração](docs/images/demo-desktop.png)
 
@@ -191,17 +191,16 @@ Configurações acessíveis apenas pelo aplicativo de tela, recursos proprietár
 ## Rascunhos e aplicação
 
 1. Leia uma seção e edite os campos ou o JSON avançado.
-2. Clique em **Revisar alterações**. O servidor valida o rascunho e retorna a comparação, sem gravar nada.
-3. Em modo de leitura, o botão de aplicação permanece bloqueado. No simulador, digite a confirmação apresentada para testar a aplicação fictícia.
-4. Para uma gravação real futura, encerre a sessão e inicie explicitamente:
+2. Clique em **Salvar alterações**. O app valida, grava e confere o resultado sem abrir modal nem pedir uma frase de confirmação.
+3. Se a conexão cair, o rascunho permanece na tela e Salvar fica desabilitado. Clique em **Reconectar ao rádio** na própria tela de configuração; depois de reconectar, clique em Salvar. Reconectar não envia o rascunho automaticamente.
+4. Em modo somente leitura, o botão Salvar fica bloqueado. No simulador, a mesma ação faz uma gravação fictícia.
+5. Para permitir gravações reais ao iniciar o servidor, use o atalho criado com `-AllowWrites` ou execute:
 
    ```powershell
    .\start.ps1 -AllowWrites
    ```
 
-5. Releia o dispositivo, prepare e revise o rascunho, digite `APLICAR !id-do-dispositivo` e clique em **Aplicar ao dispositivo**.
-
-O indicador **Gravação habilitada** ou **Somente leitura** mostra a permissão do servidor, inclusive antes de conectar um rádio. Conectar ou desconectar não altera essa permissão. A interface não pode habilitar a gravação do processo em execução. O servidor exige uma revisão de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, conecta no endereço ou porta selecionados (ou utiliza a conexão da escuta ativa), confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão. Revisar um rascunho não abre conexão com o rádio. Apenas o comando exato revisado recebe uma autorização temporária no adaptador USB ou TCP. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
+O indicador **Gravação habilitada** ou **Somente leitura** mostra a permissão do servidor, inclusive antes de conectar um rádio. Conectar ou desconectar não altera essa permissão. A interface não pode habilitar a gravação do processo em execução. Ao clicar em Salvar, a interface obtém internamente uma autorização de uso único, com validade de cinco minutos, vinculada à sessão e ao nó. Antes do envio, conecta no endereço ou porta selecionados (ou utiliza a conexão da escuta ativa), confere a identidade do rádio, relê a seção e rejeita alterações concorrentes, inclusive as feitas no menu do aparelho. A releitura, o envio e a verificação usam a mesma conexão. Apenas o comando exato revisado recebe uma autorização temporária no adaptador USB ou TCP. Depois do envio, uma nova consulta precisa confirmar os valores. Uma confirmação de entrega (ACK), isoladamente, não é tratada como sucesso de gravação.
 
 Cada aplicação modifica **uma seção**. Não há transação atômica entre várias seções nem rollback automático. Uma mudança pode reiniciar o dispositivo ou interromper a conexão. Se a verificação falhar, a interface informa resultado não confirmado e exige nova leitura; não repete a gravação automaticamente.
 
@@ -224,7 +223,7 @@ Se houver falha antes do envio, o texto volta ao editor quando ele estiver vazio
 1. Leia o rádio por **USB / Serial** ou **Rede / TCP**, conforme suporte do firmware.
 2. Abra **Mensagens**: o estado deve indicar **Conectado · recebendo mensagens**. Se houver somente uma leitura salva ou a conexão tiver sido encerrada, clique em **Conectar ao rádio**. A conexão inicial pode levar vários segundos. **Desconectar** também funciona durante essa preparação e libera o rádio depois que o handshake terminar ou expirar.
 3. A conexão permanece aberta, sem limite de 30 segundos, capturando mensagens dos canais e diretas. Você pode trocar de conversa, escrever e enviar pela mesma conexão enquanto recebe. Antes de cada envio real, o app relê o canal e a configuração LoRa para detectar mudanças desde a validação do envio. Nenhum envio é automático.
-4. É possível navegar pelo app, consultar seções e aplicar configurações com as mesmas proteções de revisão e confirmação. Essas operações utilizam a conexão existente; nenhuma segunda porta ou socket é aberto. Operações administrativas e envios são feitos um de cada vez, enquanto o leitor recebe pacotes em segundo plano.
+4. É possível navegar pelo app, consultar seções e aplicar configurações com validação dos campos, autorização de uso único e conferência por releitura. Essas operações utilizam a conexão existente; nenhuma segunda porta ou socket é aberto. Operações administrativas e envios são feitos um de cada vez, enquanto o leitor recebe pacotes em segundo plano.
 5. Clique em **Desconectar** para fechar a conexão e conservar o histórico, ou em **Encerrar sessão** para fechar e apagar o histórico. Se houver um envio ou consulta em andamento, o encerramento espera essa operação terminar.
 
 **A escuta ativa continua ao mudar de página ou fechar a aba do navegador.** Ela termina ao parar explicitamente, encerrar a sessão, desligar o servidor ou perder a conexão. Para continuar após uma queda, confira a conexão e inicie novamente; não há reconexão automática nem repetição de mensagens. Uma alteração de configuração que reinicie o rádio também pode interromper a escuta.

@@ -13,6 +13,82 @@ ROOT = Path(__file__).resolve().parent.parent
 ARTIFACTS = ROOT / "artifacts"
 
 
+def check_settings_reconnect(browser, url, session):
+    """Exercise disconnect/reconnect and an uncertain save using HTTP mocks only."""
+    session = json.loads(json.dumps(session))
+    state = session['state']
+    state.update(demo=False, connected=False, connection_mode='desktop',
+                 active_phase='off', server_writes_enabled=True, writes_enabled=True)
+    state['sections']['config.lora']['values']['config_ok_to_mqtt'] = False
+    calls = []
+    context = browser.new_context(viewport={'width': 390, 'height': 844})
+
+    def api_mock(route):
+        endpoint = route.request.url.split('/api/', 1)[1]
+        calls.append((endpoint, route.request.method))
+        status = 200
+        if endpoint == 'session':
+            result = session
+        elif endpoint == 'state':
+            result = state
+        elif endpoint == 'ports':
+            result = []
+        elif endpoint in ('messages', 'messages/active'):
+            if endpoint == 'messages/active':
+                state.update(connected=True, active_phase='active')
+            result = dict(messages=[], epoch=state['epoch'], active_phase=state['active_phase'],
+                          listening=state['connected'], max_bytes=233, can_send=True)
+        elif endpoint == 'preview':
+            body = route.request.post_data_json
+            assert body['section'] == 'config.lora'
+            assert body['values']['config_ok_to_mqtt'] is True
+            result = dict(can_apply=True, token='mock-one-use-token', confirmation='mock-device')
+        elif endpoint == 'apply':
+            assert route.request.post_data_json == {'token': 'mock-one-use-token', 'confirmation': 'mock-device'}
+            state.update(connected=False, active_phase='error')
+            status, result = 502, {'detail': 'Não foi possível confirmar a gravação. Reconecte e releia.'}
+        else:
+            raise AssertionError(f'Unexpected API request: {endpoint}')
+        route.fulfill(status=status, json=result)
+
+    context.route('**/api/**', api_mock)
+    page = context.new_page()
+    page.on('dialog', lambda dialog: dialog.accept())
+    try:
+        page.goto(url)
+        page.locator('[data-action="menu"]').click()
+        page.locator('nav [data-page="radio"]').click()
+        field = page.locator('[data-field="config_ok_to_mqtt"]')
+        field.check()
+        expect(page.locator('[data-action="save"]')).to_be_disabled()
+        expect(page.locator('[data-action="reconnect"]')).to_be_visible()
+        page.screenshot(path=str(ARTIFACTS / 'settings-disconnected-mobile.png'), full_page=True)
+        page.locator('[data-action="reconnect"]').click()
+        expect(page.locator('[data-action="save"]')).to_be_enabled()
+        expect(field).to_be_checked()
+        assert not any(endpoint == 'apply' for endpoint, _ in calls)
+        page.locator('[data-action="save"]').click()
+        expect(page.locator('#toast')).to_contain_text('Não foi possível confirmar a gravação')
+        expect(field).to_be_checked()
+        expect(page.locator('[data-action="save"]')).to_be_disabled()
+        assert sum(endpoint == 'apply' for endpoint, _ in calls) == 1
+        page.locator('[data-action="reconnect"]').click()
+        expect(page.locator('[data-action="save"]')).to_be_enabled()
+        expect(field).to_be_checked()
+        assert sum(endpoint == 'apply' for endpoint, _ in calls) == 1
+        assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
+        # Read-only sessions may prepare a draft but cannot send it.
+        state.update(server_writes_enabled=False, writes_enabled=False)
+        page.reload()
+        page.locator('[data-action="menu"]').click()
+        page.locator('nav [data-page="radio"]').click()
+        field.check()
+        expect(page.locator('[data-action="save"]')).to_be_disabled()
+        assert sum(endpoint == 'apply' for endpoint, _ in calls) == 1
+    finally:
+        context.close()
+
+
 def run():
     ARTIFACTS.mkdir(exist_ok=True)
     with socket.socket() as sock:
@@ -133,33 +209,44 @@ def run():
             page.locator('nav [data-page="radio"]').click()
             field = page.locator('[data-field="hop_limit"]')
             field.fill("4")
-            page.locator('[data-action="review"]').click()
-            expect(page.locator('#review-dialog')).to_be_visible()
-            expect(page.locator('.diff-row code')).to_have_text("hop_limit")
-            expect(page.locator('#apply-review')).to_be_disabled()
-            page.locator('#confirm-input').fill("APLICAR !de000001")
-            expect(page.locator('#apply-review')).to_be_enabled()
-            page.screenshot(path=str(ARTIFACTS / "demo-review.png"), animations="disabled")
-            page.locator('#apply-review').click()
-            expect(page.locator('#review-dialog')).not_to_be_visible()
+            page.locator('[data-field="config_ok_to_mqtt"]').check()
+            expect(page.locator('[data-field="config_ok_to_mqtt"]')).to_be_checked()
+            held_apply = []
+            page.route('**/api/apply', lambda route: held_apply.append(route))
+            page.locator('[data-action="save"]').click()
+            expect(page.locator('[data-action="save"]')).to_be_disabled()
+            expect(page.locator('[data-field="hop_limit"]')).to_be_disabled()
+            expect(page.locator('#review-dialog')).to_have_count(0)
+            expect(page.locator('#confirm-input')).to_have_count(0)
+            for _ in range(50):
+                if held_apply: break
+                page.wait_for_timeout(100)
+            assert len(held_apply) == 1
+            # A second click during a pending save must never submit twice.
+            page.locator('[data-action="save"]').evaluate('(button)=>button.click()')
+            assert len(held_apply) == 1
+            held_apply[0].fulfill(response=held_apply[0].fetch())
+            page.unroute('**/api/apply')
+            expect(page.locator('#toast')).to_contain_text('Alterações salvas e conferidas')
             expect(page.locator('[data-field="hop_limit"]')).to_have_value("4")
+            assert httpx.get(url+'/api/state').json()['sections']['config.lora']['values']['config_ok_to_mqtt'] is True
+            page.screenshot(path=str(ARTIFACTS / "demo-saved.png"), animations="disabled")
+            check_settings_reconnect(browser, url, httpx.get(url+'/api/session').json())
 
             # An invalid list must remain invalid when another field is edited.
             page.locator('[data-field="ignore_incoming"]').fill("[not json")
             page.locator('[data-field="hop_limit"]').fill("5")
-            expect(page.locator('[data-action="review"]')).to_be_disabled()
+            expect(page.locator('[data-action="save"]')).to_be_disabled()
             page.locator('[data-field="ignore_incoming"]').fill("[]")
-            expect(page.locator('[data-action="review"]')).to_be_enabled()
+            expect(page.locator('[data-action="save"]')).to_be_enabled()
             page.locator('[data-action="discard"]').click()
             expect(page.locator('[data-field="hop_limit"]')).to_have_value("4")
 
             page.locator('nav [data-page="connections"]').click()
             expect(page.locator('[data-field="wifi_psk"]')).to_have_value("")
             page.locator('[data-field="wifi_ssid"]').fill("Rede alterada no simulador")
-            page.locator('[data-action="review"]').click()
-            expect(page.locator('.diff-row code')).to_have_text("wifi_ssid")
+            expect(page.locator('[data-action="save"]')).to_be_enabled()
             assert "demo-password" not in page.locator('body').inner_text()
-            page.locator('#cancel-review').click()
             page.locator('[data-action="discard"]').click()
 
             page.locator('nav [data-page="device"]').click()
@@ -172,7 +259,7 @@ def run():
             values = json.loads(page.locator('#json-editor').input_value())
             values['gps_enabled'] = not values['gps_enabled']
             page.locator('#json-editor').fill(json.dumps(values))
-            page.locator('[data-action="review"]').click()
+            page.locator('[data-action="save"]').click()
             expect(page.locator('#toast')).to_contain_text('somente leitura')
             # This deliberately rejected preview produces one expected Chrome console error.
             assert errors == ['Failed to load resource: the server responded with a status of 400 (Bad Request)']
@@ -193,9 +280,7 @@ def run():
             page.locator('[data-section="channel.1"]').click()
             expect(page.locator('[data-field="settings.name"]')).to_have_value("Equipe")
             page.locator('[data-field="settings.name"]').fill("Trilha")
-            page.locator('[data-action="review"]').click()
-            expect(page.locator('.diff-row code')).to_have_text("settings.name")
-            page.locator('#cancel-review').click()
+            expect(page.locator('[data-action="save"]')).to_be_enabled()
             page.locator('[data-action="discard"]').click()
 
             page.locator('nav [data-page="nodes"]').click()
@@ -370,7 +455,7 @@ def run():
         assert state["device"]["simulated_writes"] == 1
         assert len(messages) == 8
         assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 0
-        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "draft review", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping", "direct send without modal", "Enter and Shift+Enter", "draft preservation during pending send", "duplicate submission prevention", "failed send text recovery", "lost response without automatic retry", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
+        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "save without modal or typed confirmation", "duplicate save prevention", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "extra settings", "channel and direct messages", "message XSS escaping", "direct send without modal", "Enter and Shift+Enter", "draft preservation during pending send", "duplicate submission prevention", "failed send text recovery", "lost response without automatic retry", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
         if proc.poll() is None:
             proc.terminate()

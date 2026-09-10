@@ -19,3 +19,5 @@
 .empty-connect>div{min-width:0}
 
 .sidebar{overflow-y:auto}.sidebar-bottom>[data-action="shutdown"]{width:100%}
+
+.switch-row .field-hint{display:block;margin-top:6px;line-height:1.6}

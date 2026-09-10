@@ -329,6 +329,14 @@ def run():
             page.locator('.chat-help > summary').last.click()
             page.locator('#chat-receive').click()
             expect(page.locator('#chat-feed')).to_contain_text('Mensagem de canal simulada')
+            expect(picker).to_have_value('Canal 0 · Padrão · 1 mensagem')
+            picker.fill('serra')
+            with page.expect_response('**/api/messages'):
+                expect(page.locator('#chat-options')).to_contain_text('1 mensagem')
+            expect(picker).to_have_value('serra')
+            expect(picker).to_be_focused()
+            picker.press('Escape')
+            expect(picker).to_have_value('Canal 0 · Padrão · 1 mensagem')
             held=[]
             page.route('**/api/messages/send', lambda route: held.append(route))
             page.locator('#chat-text').fill('Olá canal! <script>window.chatInjected=true</script>')
@@ -350,6 +358,7 @@ def run():
             page.locator('#chat-target').fill('channel:0')
             page.locator('#chat-options [data-conversation="channel:0"]').click()
             expect(page.locator('#chat-feed')).to_contain_text('Envio simulado')
+            expect(picker).to_have_value('Canal 0 · Padrão · 2 mensagens')
             expect(page.locator('#chat-feed')).to_contain_text('<script>')
             assert not page.evaluate('Boolean(window.chatInjected)')
             expect(page.locator('#chat-text')).to_have_value('Próxima mensagem em rascunho')
@@ -369,6 +378,10 @@ def run():
             direct = next(m for m in sent if m['text'].startswith('Olá, mensagem direta!'))
             assert direct['destination'] == '!de000003' and direct['channel'] == 0
             assert direct['conversation'] == 'direct:!de000003'
+            expect(picker).to_have_value('Direta · Ponto da serra (!de000003) · 2 mensagens')
+            picker.fill('serra')
+            expect(page.locator('#chat-options')).to_contain_text('2 mensagens')
+            picker.press('Escape')
             page.screenshot(path=str(ARTIFACTS / 'demo-messages.png'), full_page=True, animations='disabled')
             page.set_viewport_size({'width': 390, 'height': 844})
             assert not page.evaluate('document.documentElement.scrollWidth > innerWidth')
@@ -499,7 +512,7 @@ def run():
         assert state["device"]["simulated_writes"] == 1
         assert len(messages) == 8
         assert messages[-1]['destination'] == '!de000003' and messages[-1]['channel'] == 0
-        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "save without modal or typed confirmation", "duplicate save prevention", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "conversation search by name and ID", "accent-insensitive search", "keyboard selection without sending", "search and draft preservation during polling", "mobile conversation search", "extra settings", "channel and direct messages", "message XSS escaping", "direct send without modal", "Enter and Shift+Enter", "draft preservation during pending send", "duplicate submission prevention", "failed send text recovery", "lost response without automatic retry", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
+        print(json.dumps({"passed": True, "checks": ["TCP and serial selector", "TCP form payload", "desktop", "mobile", "schema forms", "save without modal or typed confirmation", "duplicate save prevention", "simulated write and readback", "secret preservation", "invalid JSON", "channels", "node search", "conversation search by name and ID", "accent-insensitive search", "conversation message counters", "keyboard selection without sending", "search and draft preservation during polling", "mobile conversation search", "extra settings", "channel and direct messages", "message XSS escaping", "direct send without modal", "Enter and Shift+Enter", "draft preservation during pending send", "duplicate submission prevention", "failed send text recovery", "lost response without automatic retry", "active listening with send, navigation and stop"], "browser_errors": errors, "serial_writes": 0}, indent=2))
     finally:
         if proc.poll() is None:
             proc.terminate()

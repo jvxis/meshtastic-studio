@@ -2,6 +2,7 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
   let data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false}, target='', timer, sending=false, viewBusy=false, generation=0, polling=false;
   const drafts=new Map();
   const failedMessages=new Map();
+  let query='', pickerOpen=false, activeOption=0;
   const status={preparing:'Preparando',unconfirmed:'Sem confirmação de rede',ack:'ACK de rede · não confirma leitura',rejected:'Rede recusou o envio',unknown:'Resultado desconhecido · confira antes de reenviar',received:'Recebida',observed:'Observada no rádio',simulated:'Envio simulado'};
   const $=s=>document.querySelector(s);
   const peerName=id=>getState().nodes.find(n=>n.id===id)?.name||id;
@@ -13,10 +14,28 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
     return result;
   }
   const title=()=>options().find(o=>o.id===target)?.label||'Escolha uma conversa';
-  function optionMarkup(){return options().map(o=>{
-    const count=data.messages.filter(m=>m.conversation===o.id).length;
-    return `<option value="${esc(o.id)}" ${o.id===target?'selected':''}>${esc(o.label)}${count?` · ${count} mensagem(ns)`:''}</option>`;
-  }).join('');}
+  const normalize=value=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  const matches=()=>options().filter(o=>normalize(`${o.label} ${o.id}`).includes(normalize(query.trim())));
+  function updatePicker(){
+    const input=$('#chat-target'), list=$('#chat-options');
+    if(!input||!list)return;
+    input.setAttribute('aria-expanded',String(pickerOpen));list.hidden=!pickerOpen;
+    if(!pickerOpen){input.removeAttribute('aria-activedescendant');return;}
+    const items=matches();activeOption=Math.max(0,Math.min(activeOption,items.length-1));
+    const markup=items.map((o,i)=>`<button type="button" role="option" tabindex="-1" id="chat-option-${i}" data-conversation="${esc(o.id)}" aria-selected="${i===activeOption}">${esc(o.label)}${o.id===target?'<span class="field-hint">Conversa atual</span>':''}</button>`).join('')||'<p class="chat-no-results" role="status">Nenhum canal ou nó encontrado.</p>';
+    if(list.innerHTML!==markup)list.innerHTML=markup;
+    if(items.length)input.setAttribute('aria-activedescendant',`chat-option-${activeOption}`);
+    else input.removeAttribute('aria-activedescendant');
+  }
+  function closePicker(){
+    pickerOpen=false;query='';
+    if($('#chat-target'))$('#chat-target').value=title();
+    updatePicker();updateCount();
+  }
+  async function chooseConversation(id){
+    if(viewBusy||isBusy()||!options().some(o=>o.id===id))return;
+    target=id;closePicker();await task(async()=>{});$('#chat-text')?.focus();
+  }
   function feed(){
     const messages=data.messages.filter(m=>m.conversation===target);
     return messages.map(m=>`<article class="chat-message ${m.direction==='out'?'outgoing':''}"><div class="chat-meta">${esc(m.direction==='out'?'Você':peerName(m.sender))} · ${esc(new Date(m.time).toLocaleTimeString('pt-BR'))}${m.via_mqtt?' · via MQTT':''}</div><p>${esc(m.text)}</p><div class="chat-meta">${esc(status[m.status]||m.status)}</div></article>`).join('')||'<div class="empty"><h3>Nenhuma mensagem capturada nesta conversa</h3><p>As mensagens recebidas aparecerão aqui enquanto o rádio estiver conectado.</p></div>';
@@ -53,8 +72,7 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
       const changed=next.active_phase!==data.active_phase;
       data=next;
       if(changed){getState().active_phase=next.active_phase;if(!activePending())await refreshState();if(!sending)await task(async()=>{});}
-      const recipient=$('#chat-target');
-      if(recipient){const markup=optionMarkup();if(markup&&recipient.innerHTML!==markup)recipient.innerHTML=markup;}
+      updatePicker();
       const list=$('#chat-feed');
       if(list){const atEnd=list.scrollHeight-list.scrollTop-list.clientHeight<50;list.innerHTML=feed();if(atEnd)list.scrollTop=list.scrollHeight;}
       if($('#chat-receive-status'))$('#chat-receive-status').textContent=receiveStatus();
@@ -69,7 +87,7 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
     data.active_phase=state.active_phase||'off';
     data.listening=['starting','active','stopping'].includes(data.active_phase)||data.listening&&data.listen_mode==='window';
     const opts=options();if(!opts.some(o=>o.id===target))target=opts[0]?.id||'';
-    return `<section class="card chat-panel"><div class="chat-toolbar"><label>Conversa<select id="chat-target" ${busy?'disabled':''}>${opts.map(o=>`<option value="${esc(o.id)}" ${o.id===target?'selected':''}>${esc(o.label)}</option>`).join('')||'<option>Leia um dispositivo para começar</option>'}</select></label><div class="actions"><button class="btn primary" id="chat-active" ${busy||data.listening||!state.session_active?'disabled':''}>Conectar ao rádio</button><button class="btn ghost" id="chat-stop" ${data.listening?'':'disabled'}>Desconectar</button></div></div><p id="chat-receive-status" class="field-hint" role="status">${esc(receiveStatus())}</p><details id="chat-connection-error" class="chat-help" hidden><summary>Detalhes da conexão</summary><p id="chat-connection-detail" class="field-hint"></p></details><h2 id="chat-title">${esc(title())}</h2><div id="chat-feed" class="chat-feed" role="log" aria-label="Mensagens da conversa" aria-live="polite">${feed()}</div><label class="chat-composer">Mensagem<textarea id="chat-text" rows="2" placeholder="Escreva uma mensagem…" ${busy||!state.session_active?'disabled':''}>${esc(drafts.get(target)||'')}</textarea></label><div class="chat-footer"><span id="chat-bytes" class="field-hint"></span><button class="btn primary" id="chat-send" disabled>${icon('arrow')}Enviar</button></div><div id="chat-send-status" class="field-hint" role="status" aria-live="polite"></div><div id="chat-recovery"></div><p class="field-hint">Enter envia · Shift+Enter quebra a linha</p>${state.session_active&&!state.writes_enabled?'<p class="field-hint">Envios bloqueados no modo somente leitura. A recepção continua disponível.</p>':''}<details class="chat-help"><summary>Sobre recepção e entrega</summary><button class="btn ghost" id="chat-receive" ${busy||data.listening||!state.session_active?'disabled':''}>${icon('download')}${state.demo?'Simular recebimento':'Receber por 30 segundos'}</button><p class="field-hint">A escuta ativa continua ao navegar no app ou fechar a aba. Use Desconectar ou Encerrar sessão para liberar o rádio. Se a conexão cair, use Conectar ao rádio novamente; não há reconexão automática.</p><p class="field-hint">O histórico contém até 300 mensagens capturadas nesta sessão. Não importa o histórico completo do rádio e pode perder mensagens enquanto o app está desconectado. Encerrar a sessão ou reiniciar o servidor apaga este histórico.</p><p class="field-hint">ACK de rede não confirma leitura nem entrega a todos os membros de um canal. Uma falha de confirmação não provoca reenvio automático.</p></details></section>`;
+    return `<section class="card chat-panel"><div class="chat-toolbar"><div class="chat-picker"><label for="chat-target">Conversa</label><div class="chat-search">${icon('search')}<input id="chat-target" type="text" role="combobox" aria-autocomplete="list" aria-controls="chat-options" aria-expanded="${pickerOpen}" autocomplete="off" placeholder="Buscar por nome, ID ou canal…" value="${esc(pickerOpen?query:title())}" ${busy?'disabled':''}></div><div id="chat-options" class="chat-options" role="listbox" aria-label="Canais e nós" hidden></div></div><div class="actions"><button class="btn primary" id="chat-active" ${busy||data.listening||!state.session_active?'disabled':''}>Conectar ao rádio</button><button class="btn ghost" id="chat-stop" ${data.listening?'':'disabled'}>Desconectar</button></div></div><p id="chat-receive-status" class="field-hint" role="status">${esc(receiveStatus())}</p><details id="chat-connection-error" class="chat-help" hidden><summary>Detalhes da conexão</summary><p id="chat-connection-detail" class="field-hint"></p></details><h2 id="chat-title">${esc(title())}</h2><div id="chat-feed" class="chat-feed" role="log" aria-label="Mensagens da conversa" aria-live="polite">${feed()}</div><label class="chat-composer">Mensagem<textarea id="chat-text" rows="2" placeholder="Escreva uma mensagem…" ${busy||!state.session_active?'disabled':''}>${esc(drafts.get(target)||'')}</textarea></label><div class="chat-footer"><span id="chat-bytes" class="field-hint"></span><button class="btn primary" id="chat-send" disabled>${icon('arrow')}Enviar</button></div><div id="chat-send-status" class="field-hint" role="status" aria-live="polite"></div><div id="chat-recovery"></div><p class="field-hint">Enter envia · Shift+Enter quebra a linha</p>${state.session_active&&!state.writes_enabled?'<p class="field-hint">Envios bloqueados no modo somente leitura. A recepção continua disponível.</p>':''}<details class="chat-help"><summary>Sobre recepção e entrega</summary><button class="btn ghost" id="chat-receive" ${busy||data.listening||!state.session_active?'disabled':''}>${icon('download')}${state.demo?'Simular recebimento':'Receber por 30 segundos'}</button><p class="field-hint">A escuta ativa continua ao navegar no app ou fechar a aba. Use Desconectar ou Encerrar sessão para liberar o rádio. Se a conexão cair, use Conectar ao rádio novamente; não há reconexão automática.</p><p class="field-hint">O histórico contém até 300 mensagens capturadas nesta sessão. Não importa o histórico completo do rádio e pode perder mensagens enquanto o app está desconectado. Encerrar a sessão ou reiniciar o servidor apaga este histórico.</p><p class="field-hint">ACK de rede não confirma leitura nem entrega a todos os membros de um canal. Uma falha de confirmação não provoca reenvio automático.</p></details></section>`;
   }
   function updateRecovery(){
     const el=$('#chat-recovery'), item=failedMessages.get(target);
@@ -91,14 +109,14 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
       $('#chat-bytes').classList.toggle('over-limit',bytes>data.max_bytes);
     }
     if($('#chat-send')){
-      $('#chat-send').disabled=viewBusy||sending||activePending()||disconnectedDesktop()||!getState().writes_enabled||!target||!valid;
+      $('#chat-send').disabled=pickerOpen||viewBusy||sending||activePending()||disconnectedDesktop()||!getState().writes_enabled||!target||!valid;
       $('#chat-send').innerHTML=icon('arrow')+(sending?'Enviando…':'Enviar');
     }
     if($('#chat-send-status'))$('#chat-send-status').textContent=sending?'Enviando. Você pode continuar escrevendo a próxima mensagem.':'';
     updateRecovery();
   }
   async function sendMessage(){
-    if(sending||viewBusy||activePending()||disconnectedDesktop()||!getState().writes_enabled||!target)return;
+    if(pickerOpen||sending||viewBusy||activePending()||disconnectedDesktop()||!getState().writes_enabled||!target)return;
     const input=$('#chat-text'), text=input?.value||'';
     if(!text.trim()||text.includes('\0')||new TextEncoder().encode(text).length>data.max_bytes)return;
     const conversation=target, version=generation, epoch=getState().epoch;
@@ -139,7 +157,29 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
   }
   function bind(){
     if(!$('#chat-target'))return;
-    $('#chat-target').onchange=e=>{target=e.target.value;task(async()=>{});};
+    const recipient=$('#chat-target');
+    const openPicker=()=>{
+      if(!pickerOpen){pickerOpen=true;query='';activeOption=0;recipient.value='';}
+      updatePicker();updateCount();
+    };
+    recipient.onfocus=openPicker;
+    recipient.onclick=openPicker;
+    recipient.oninput=()=>{query=recipient.value;pickerOpen=true;activeOption=0;updatePicker();updateCount();};
+    recipient.onblur=closePicker;
+    recipient.onkeydown=e=>{
+      if(e.isComposing||e.keyCode===229)return;
+      if(e.key==='Escape'){e.preventDefault();closePicker();}
+      else if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+        e.preventDefault();const wasOpen=pickerOpen;openPicker();
+        if(wasOpen)activeOption+=e.key==='ArrowDown'?1:-1;
+        updatePicker();$(`#chat-option-${activeOption}`)?.scrollIntoView({block:'nearest'});
+      }else if(e.key==='Enter'&&pickerOpen){
+        e.preventDefault();const choice=matches()[activeOption];if(choice&&!e.repeat)chooseConversation(choice.id);
+      }
+    };
+    $('#chat-options').onpointerdown=e=>e.preventDefault();
+    $('#chat-options').onclick=e=>{const choice=e.target.closest('[data-conversation]');if(choice)chooseConversation(choice.dataset.conversation);};
+    updatePicker();
     $('#chat-text').oninput=e=>{drafts.set(target,e.target.value);updateCount();};
     $('#chat-active').onclick=()=>task(async()=>{data=await api('messages/active',{});getState().active_phase=data.active_phase;await poll();});
     $('#chat-stop').onclick=async()=>{try{await api('messages/stop',{});await poll();}catch(e){notify(e.message,true);}};
@@ -152,6 +192,6 @@ export function createChat({api, esc, icon, getState, task, notify, refreshState
     };
     updateReceptionButtons();updateCount();pausePolling();poll();timer=setInterval(poll,1500);
   }
-  function reset(){generation++;sending=false;failedMessages.clear();pausePolling();data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false};drafts.clear();target='';}
+  function reset(){generation++;sending=false;failedMessages.clear();pausePolling();data={messages:[],listening:false,active_phase:'off',max_bytes:233,can_send:false};drafts.clear();target='';query='';pickerOpen=false;activeOption=0;}
   return {render,bind,watch,pausePolling,reset,hasDrafts:()=>sending||failedMessages.size>0||[...drafts.values()].some(t=>t.trim())};
 }

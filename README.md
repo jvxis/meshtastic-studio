@@ -207,7 +207,7 @@ Cada aplicação modifica **uma seção**. Não há transação atômica entre v
 ## Mensagens de canais e mensagens diretas
 
 1. Leia seu rádio na visão geral e abra **Mensagens** no menu lateral.
-2. Em **Conversa**, escolha um canal habilitado ou uma conversa direta com um nó conhecido. Em mensagens diretas, basta escolher o destinatário: o app usa automaticamente o canal primário como parâmetro de envio, mantendo a mensagem endereçada somente ao nó escolhido.
+2. Em **Conversa**, digite o nome do canal, o nome do nó ou seu ID para filtrar a lista. A busca ignora maiúsculas e acentos. Clique no resultado ou use as setas e Enter para escolher; Esc cancela a busca. Em mensagens diretas, basta escolher o destinatário: o app usa automaticamente o canal primário como parâmetro de envio, mantendo a mensagem endereçada somente ao nó escolhido.
 3. Escreva até **233 bytes UTF-8**; letras acentuadas e emojis podem ocupar mais de um byte. Clique em **Enviar** ou pressione **Enter**. **Shift+Enter** insere uma quebra de linha. Não há modal de revisão de mensagens.
 4. O envio real exige iniciar com `./start.ps1 -AllowWrites`. Em modo somente leitura, a recepção permanece disponível, mas mensagens não são transmitidas. No simulador, os envios são fictícios.
 5. Ao conectar, a recepção já está ativa. A opção **Receber por 30 segundos** fica dentro de **Sobre recepção e entrega**, para uso pontual. A janela começa após a conexão inicial; o handshake pode acrescentar cerca de 40 segundos. **Desconectar** pede encerramento antecipado, inclusive durante o handshake, que precisa terminar ou expirar antes de liberar a porta. Não há renovação automática.

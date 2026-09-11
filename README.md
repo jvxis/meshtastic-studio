@@ -292,3 +292,9 @@ Veja [VALIDATION.md](VALIDATION.md) para os resultados de testes e a verificaç�
 | `tests/` | Testes de segurança, fluxo de aplicação e navegador |
 
 O projeto usa a biblioteca Meshtastic, licenciada sob GPL-3.0-only. Este repositório é distribuído sob a mesma licença; veja `LICENSE`.
+
+### Renovar o cadastro de um nó
+
+Com o rádio conectado e a gravação habilitada, abra **Nós da rede**, procure o contato e clique em **Renovar nó**. A ação remove somente o cadastro desse contato (incluindo a chave pública antiga e favoritos) no rádio e envia uma solicitação de Node Info pelo canal primário, via conexão USB ou TCP. Não altera a chave do próprio rádio nem apaga o histórico do app.
+
+**Aguardando dados e chave pública** significa que a solicitação foi enviada, mas o outro nó ainda precisa responder ou anunciar seus dados. Mantenha a recepção conectada e use **Atualizar lista** para consultar o resultado. **Chave pública recebida** permite tentar uma mensagem direta, mas não confirma entrega nem verifica a identidade do contato. O firmware remoto pode limitar respostas. Se a conexão cair, a operação fica indicada como interrompida: consulte a lista antes de repetir, pois a remoção pode ter ocorrido. O app não repete automaticamente a remoção. No simulador, a ação não acessa rádios.

@@ -60,6 +60,11 @@ class ConnectBody(BaseModel):
         return self
 
 
+class RenewNodeBody(BaseModel):
+    node_id: str = Field(pattern=r"^![0-9a-f]{8}$")
+    epoch: str = Field(min_length=1, max_length=100)
+
+
 class PreviewBody(BaseModel):
     section: str = Field(max_length=80)
     revision: str = Field(max_length=100)
@@ -79,6 +84,7 @@ class Manager(Messaging):
         self.epoch = secrets.token_hex(16)
         self.previews = {}
         self.events = []
+        self.node_renewals = {}
         self.shutting_down = False
         self.init_messaging()
 
@@ -132,7 +138,40 @@ class Manager(Messaging):
                     "server_writes_enabled": self.allow_writes, "epoch": self.epoch,
                     "device": dev.summary() if dev else None,
                     "sections": {key: self.section(key) for key in DEFINITIONS} if dev else {},
-                    "nodes": dev.nodes() if dev else [], "events": self.events}
+                    "nodes": dev.nodes() if dev else [], "node_renewals": self.renewal_state(), "events": self.events}
+
+    def renewal_state(self):
+        nodes = {n['id']: n for n in self.device.nodes()} if self.device else {}
+        for node_id, item in self.node_renewals.items():
+            if item['status'] == 'waiting' and nodes.get(node_id, {}).get('has_public_key'):
+                item['status'] = 'received'
+        return copy.deepcopy(self.node_renewals)
+
+    def renew_node(self, body):
+        with self.lock:
+            dev = self.require()
+            if body.epoch != self.epoch:
+                raise HTTPException(409, "A sessão mudou. Atualize a página antes de renovar o nó.")
+            if not (dev.demo or self.allow_writes):
+                raise HTTPException(403, "Habilite a gravação para renovar um nó.")
+            node = next((n for n in dev.nodes() if n['id'] == body.node_id and not n['local']), None)
+            if not node or body.node_id in (dev.node_id, '!00000000', '!ffffffff'):
+                raise HTTPException(400, "Escolha outro nó conhecido da rede.")
+            previous = self.node_renewals.get(body.node_id)
+            if previous and time.time() - previous['requested_at'] < 60:
+                raise HTTPException(409, "Aguarde um minuto antes de solicitar novamente.")
+            item = {'name': node['name'], 'status': 'uncertain', 'requested_at': time.time()}
+            self.node_renewals[body.node_id] = item
+            try:
+                with self.communication() as transport:
+                    if not dev.demo:
+                        transport.renew_node(body.node_id)
+                item['status'] = 'simulated' if dev.demo else 'waiting'
+            except Exception:
+                self.log("Renovação interrompida", f"{body.node_id}: consulte o cadastro antes de repetir.", "warning")
+                raise
+            self.log("Renovação de nó", f"{body.node_id}: " + ("simulada" if dev.demo else "dados públicos solicitados; aguardando resposta"))
+            return self.state()
 
     def disconnect(self):
         self.disconnecting = True
@@ -148,6 +187,7 @@ class Manager(Messaging):
                     self.device.close()
                     self.log("Desconexão", "Conexão com o rádio encerrada.")
                 self.device = None
+                self.node_renewals.clear()
                 self.previews.clear()
                 self.message_previews.clear()
                 self.active_phase = 'off'
@@ -414,6 +454,10 @@ def create_app(manager=None, shutdown_callback=None):
     @app.post("/api/apply")
     def apply(body: ApplyBody):
         return manager.apply(body)
+
+    @app.post("/api/nodes/renew")
+    def renew_node(body: RenewNodeBody):
+        return manager.renew_node(body)
 
     @app.get("/api/messages")
     def messages():

@@ -285,6 +285,9 @@ def run():
 
             page.locator('nav [data-page="nodes"]').click()
             expect(page.locator('tbody tr')).to_have_count(6)
+            expect(page.locator('[data-renew-node]')).to_have_count(5)
+            page.locator('[data-renew-node="!de000002"]').click()
+            expect(page.get_by_role('status').filter(has_text='Renovação simulada')).to_be_visible()
             page.locator('#node-search').fill("serra")
             expect(page.locator('tbody tr')).to_have_count(1)
 

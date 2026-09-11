@@ -18,7 +18,7 @@ READS = {"get_channel_request", "get_owner_request", "get_config_request",
          "get_module_config_request", "get_canned_message_module_messages_request",
          "get_device_metadata_request", "get_ringtone_request", "get_ui_config_request"}
 WRITES = {"set_owner", "set_channel", "set_config", "set_module_config",
-          "set_canned_message_module_messages", "set_ringtone_message", "store_ui_config"}
+          "set_canned_message_module_messages", "set_ringtone_message", "store_ui_config", "remove_by_nodenum"}
 
 
 def public_node_fields(value):
@@ -45,6 +45,7 @@ class GuardedTransport:
     def __init__(self, *args, **kwargs):
         self.write_grants = {}
         self.text_grants = {}
+        self.nodeinfo_grants = {}
         self.message_packets = 0
         self.write_packets = 0
         self.read_packets = 0
@@ -54,6 +55,12 @@ class GuardedTransport:
         kind = packet.WhichOneof("payload_variant")
         if kind in {"want_config_id", "heartbeat", "disconnect"}:
             return False
+        if kind == "packet" and packet.packet.decoded.portnum == portnums_pb2.PortNum.NODEINFO_APP:
+            p = packet.packet
+            key = text_signature(p.to, p.channel, p.decoded.payload)
+            if p.decoded.want_response and self.nodeinfo_grants.get(key, 0) > time.monotonic():
+                return False
+            raise PermissionError("Consulta de nó sem autorização.")
         if kind == "packet" and packet.packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
             p = packet.packet
             key = text_signature(p.to, p.channel, p.decoded.payload)
@@ -82,6 +89,9 @@ class GuardedTransport:
     def _sendToRadioImpl(self, packet):
         mutating = self.inspect_packet(packet)
         result = super()._sendToRadioImpl(packet)
+        if packet.WhichOneof("payload_variant") == "packet" and packet.packet.decoded.portnum == portnums_pb2.PortNum.NODEINFO_APP:
+            p = packet.packet
+            self.nodeinfo_grants.pop(text_signature(p.to, p.channel, p.decoded.payload), None)
         if mutating and packet.packet.decoded.portnum == portnums_pb2.PortNum.TEXT_MESSAGE_APP:
             self.message_packets += 1
             self.text_grants.pop(text_signature(packet.packet.to, packet.packet.channel, packet.packet.decoded.payload), None)
@@ -344,6 +354,35 @@ class RealDevice:
         # ACK only confirms delivery. Verify persisted fields using an independent read.
         return self.read(key)
 
+    def renew_node(self, node_id):
+        target = int(node_id[1:], 16)
+        if target in (0, 0xffffffff, self.node_num) or target not in self.iface.nodesByNum:
+            raise ValueError("Escolha outro nó conhecido da rede.")
+        primary = next((v.index for k, v in self.entries.items()
+                        if k.startswith("channel.") and v.role == 1), None)
+        if primary is None:
+            raise ValueError("O rádio precisa de um canal primário habilitado.")
+        info = mesh_pb2.User()
+        json_format.ParseDict(self.iface.nodesByNum[self.node_num]["user"], info, ignore_unknown_fields=True)
+        command = admin_pb2.AdminMessage(remove_by_nodenum=target)
+        grant = signature(command)
+        self.iface.write_grants[grant] = time.monotonic() + 20
+        try:
+            self.exchange(command)
+        finally:
+            self.iface.write_grants.pop(grant, None)
+        # Only discard the client cache after the radio acknowledges removal.
+        self.iface.nodesByNum.pop(target, None)
+        self.iface.nodes.pop(node_id, None)
+        key = text_signature(target, primary, info.SerializeToString())
+        self.iface.nodeinfo_grants[key] = time.monotonic() + 20
+        try:
+            self.iface.sendData(info, destinationId=target, channelIndex=primary,
+                                portNum=portnums_pb2.PortNum.NODEINFO_APP,
+                                wantResponse=True, wantAck=True)
+        finally:
+            self.iface.nodeinfo_grants.pop(key, None)
+
     def summary(self):
         local = (self.iface.nodesByNum or {}).get(self.node_num, {})
         owner = as_dict(self.entries["owner"]) if "owner" in self.entries else {}
@@ -366,6 +405,7 @@ class RealDevice:
                            "short_name": user.get("shortName", ""), "hardware": user.get("hwModel", "—"),
                            "last_heard": node.get("lastHeard"), "snr": node.get("snr"),
                            "hops": node.get("hopsAway"), "via_mqtt": node.get("viaMqtt", False),
+                           "has_public_key": bool(user.get("publicKey")),
                            "local": node["num"] == self.node_num})
         return result
 
@@ -373,6 +413,7 @@ class RealDevice:
         try:
             self.iface.write_grants.clear()
             self.iface.text_grants.clear()
+            self.iface.nodeinfo_grants.clear()
             self.iface.close()
         finally:
             pub.unsubscribe(self.on_packet, "meshtastic.receive")
